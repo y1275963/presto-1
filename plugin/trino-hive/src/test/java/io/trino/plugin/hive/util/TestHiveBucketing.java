@@ -365,7 +365,7 @@ public class TestHiveBucketing
         throw new IllegalArgumentException("Unsupported bucketing version: " + bucketingVersion);
     }
 
-    private static Object toNativeContainerValue(Type type, Object hiveValue)
+    public static Object toNativeContainerValue(Type type, Object hiveValue)
     {
         if (hiveValue == null) {
             return null;

@@ -19,6 +19,7 @@ import com.google.common.collect.ImmutableSet;
 import io.trino.filesystem.TrinoFileSystem;
 import io.trino.filesystem.TrinoFileSystemFactory;
 import io.trino.filesystem.TrinoInputFile;
+import io.trino.parquet.BloomFilterStore;
 import io.trino.parquet.ParquetCorruptionException;
 import io.trino.parquet.ParquetDataSource;
 import io.trino.parquet.ParquetDataSourceId;
@@ -76,6 +77,7 @@ import static com.google.common.base.Strings.nullToEmpty;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static io.trino.memory.context.AggregatedMemoryContext.newSimpleAggregatedMemoryContext;
+import static io.trino.parquet.BloomFilterStore.hasBloomFilter;
 import static io.trino.parquet.ParquetTypeUtils.constructField;
 import static io.trino.parquet.ParquetTypeUtils.getColumnIO;
 import static io.trino.parquet.ParquetTypeUtils.getDescriptors;
@@ -129,6 +131,7 @@ public class ParquetPageSourceFactory
     private final FileFormatDataSourceStats stats;
     private final ParquetReaderOptions options;
     private final DateTimeZone timeZone;
+    private final int domainCompactionThreshold;
 
     @Inject
     public ParquetPageSourceFactory(
@@ -141,6 +144,7 @@ public class ParquetPageSourceFactory
         this.stats = requireNonNull(stats, "stats is null");
         options = config.toParquetReaderOptions();
         timeZone = hiveConfig.getParquetDateTimeZone();
+        domainCompactionThreshold = hiveConfig.getDomainCompactionThreshold();
     }
 
     @Override
@@ -181,7 +185,8 @@ public class ParquetPageSourceFactory
                         .withMaxReadBlockSize(getParquetMaxReadBlockSize(session))
                         .withUseColumnIndex(isParquetUseColumnIndex(session))
                         .withBatchColumnReaders(isParquetOptimizedReaderEnabled(session)),
-                Optional.empty()));
+                Optional.empty(),
+                domainCompactionThreshold));
     }
 
     /**
@@ -197,7 +202,8 @@ public class ParquetPageSourceFactory
             DateTimeZone timeZone,
             FileFormatDataSourceStats stats,
             ParquetReaderOptions options,
-            Optional<ParquetWriteValidation> parquetWriteValidation)
+            Optional<ParquetWriteValidation> parquetWriteValidation,
+            int domainCompactionThreshold)
     {
         // Ignore predicates on partial columns for now.
         effectivePredicate = effectivePredicate.filter((column, domain) -> column.isBaseColumn());
@@ -223,7 +229,7 @@ public class ParquetPageSourceFactory
                     ? TupleDomain.all()
                     : getParquetTupleDomain(descriptorsByPath, effectivePredicate, fileSchema, useColumnNames);
 
-            Predicate parquetPredicate = buildPredicate(requestedSchema, parquetTupleDomain, descriptorsByPath, timeZone);
+            Predicate parquetPredicate = buildPredicate(requestedSchema, parquetTupleDomain, descriptorsByPath, timeZone, domainCompactionThreshold);
 
             long nextStart = 0;
             ImmutableList.Builder<BlockMetaData> blocks = ImmutableList.builder();
@@ -232,8 +238,19 @@ public class ParquetPageSourceFactory
             for (BlockMetaData block : parquetMetadata.getBlocks()) {
                 long firstDataPage = block.getColumns().get(0).getFirstDataPageOffset();
                 Optional<ColumnIndexStore> columnIndex = getColumnIndexStore(dataSource, block, descriptorsByPath, parquetTupleDomain, options);
+                Optional<BloomFilterStore> bloomFilterStore = getBloomFilterStore(dataSource, block, parquetTupleDomain, options);
+
                 if (start <= firstDataPage && firstDataPage < start + length
-                        && predicateMatches(parquetPredicate, block, dataSource, descriptorsByPath, parquetTupleDomain, columnIndex, timeZone)) {
+                        && predicateMatches(
+                        parquetPredicate,
+                        block,
+                        dataSource,
+                        descriptorsByPath,
+                        parquetTupleDomain,
+                        columnIndex,
+                        bloomFilterStore,
+                        timeZone,
+                        domainCompactionThreshold)) {
                     blocks.add(block);
                     blockStarts.add(nextStart);
                     columnIndexes.add(columnIndex);
@@ -384,6 +401,37 @@ public class ParquetPageSourceFactory
                 .collect(toImmutableSet());
 
         return Optional.of(new TrinoColumnIndexStore(dataSource, blockMetadata, columnsReadPaths, columnsFilteredPaths));
+    }
+
+    public static Optional<BloomFilterStore> getBloomFilterStore(
+            ParquetDataSource dataSource,
+            BlockMetaData blockMetadata,
+            TupleDomain<ColumnDescriptor> parquetTupleDomain,
+            ParquetReaderOptions options)
+    {
+        if (!options.useBloomFilter()) {
+            return Optional.empty();
+        }
+
+        boolean hasBloomFilter = false;
+        for (ColumnChunkMetaData column : blockMetadata.getColumns()) {
+            if (hasBloomFilter(column)) {
+                hasBloomFilter = true;
+                break;
+            }
+        }
+
+        if (!hasBloomFilter) {
+            return Optional.empty();
+        }
+
+        Map<ColumnDescriptor, Domain> parquetDomains = parquetTupleDomain.getDomains()
+                .orElseThrow(() -> new IllegalStateException("Predicate other than none should have domains"));
+        Set<ColumnPath> columnsFilteredPaths = parquetDomains.keySet().stream()
+                .map(column -> ColumnPath.get(column.getPath()))
+                .collect(toImmutableSet());
+
+        return Optional.of(new BloomFilterStore(dataSource, blockMetadata, columnsFilteredPaths));
     }
 
     public static TupleDomain<ColumnDescriptor> getParquetTupleDomain(

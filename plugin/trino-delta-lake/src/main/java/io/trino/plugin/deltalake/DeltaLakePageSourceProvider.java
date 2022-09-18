@@ -195,7 +195,8 @@ public class DeltaLakePageSourceProvider
                     parquetReaderOptions,
                     parquetPredicate,
                     typeManager,
-                    updateResultJsonCodec);
+                    updateResultJsonCodec,
+                    domainCompactionThreshold);
         }
 
         ReaderPageSource pageSource = ParquetPageSourceFactory.createPageSource(
@@ -208,7 +209,8 @@ public class DeltaLakePageSourceProvider
                 parquetDateTimeZone,
                 fileFormatDataSourceStats,
                 options,
-                Optional.empty());
+                Optional.empty(),
+                domainCompactionThreshold);
 
         verify(pageSource.getReaderColumns().isEmpty(), "All columns expected to be base columns");
 

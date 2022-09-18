@@ -20,6 +20,7 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 import io.airlift.slice.Slice;
 import io.airlift.slice.SliceInput;
+import io.trino.parquet.BloomFilterStore;
 import io.trino.parquet.DictionaryPage;
 import io.trino.parquet.ParquetDataSource;
 import io.trino.parquet.ParquetEncoding;
@@ -69,7 +70,7 @@ public final class PredicateUtils
 {
     // Maximum size of dictionary that we will read for row-group pruning.
     // Reading larger dictionaries is typically not beneficial. Before checking
-    // the dictionary, the row-group and page indexes have already been checked
+    // the dictionary, the row-group, page indexes and bloomfilters have already been checked
     // and when the dictionary does not eliminate a row-group, the work done to
     // decode the dictionary and match it with predicates is wasted.
     private static final int MAX_DICTIONARY_SIZE = 8096;
@@ -117,7 +118,8 @@ public final class PredicateUtils
             MessageType requestedSchema,
             TupleDomain<ColumnDescriptor> parquetTupleDomain,
             Map<List<String>, ColumnDescriptor> descriptorsByPath,
-            DateTimeZone timeZone)
+            DateTimeZone timeZone,
+            int domainCompactionThreshold)
     {
         ImmutableList.Builder<ColumnDescriptor> columnReferences = ImmutableList.builder();
         for (String[] paths : requestedSchema.getPaths()) {
@@ -126,7 +128,7 @@ public final class PredicateUtils
                 columnReferences.add(descriptor);
             }
         }
-        return new TupleDomainParquetPredicate(parquetTupleDomain, columnReferences.build(), timeZone);
+        return new TupleDomainParquetPredicate(parquetTupleDomain, columnReferences.build(), timeZone, domainCompactionThreshold);
     }
 
     public static boolean predicateMatches(
@@ -136,7 +138,9 @@ public final class PredicateUtils
             Map<List<String>, ColumnDescriptor> descriptorsByPath,
             TupleDomain<ColumnDescriptor> parquetTupleDomain,
             Optional<ColumnIndexStore> columnIndexStore,
-            DateTimeZone timeZone)
+            Optional<BloomFilterStore> bloomFilterStore,
+            DateTimeZone timeZone,
+            int domainCompactionThreshold)
             throws IOException
     {
         Map<ColumnDescriptor, Statistics<?>> columnStatistics = getStatistics(block, descriptorsByPath);
@@ -147,13 +151,17 @@ public final class PredicateUtils
         if (candidateColumns.get().isEmpty()) {
             return true;
         }
-        // Perform column index and dictionary lookups only for the subset of columns where it can be useful.
+        // Perform column index, bloom filter checks and dictionary lookups only for the subset of columns where it can be useful.
         // This prevents unnecessary filesystem reads and decoding work when the predicate on a column comes from
         // file-level min/max stats or more generally when the predicate selects a range equal to or wider than row-group min/max.
-        Predicate indexPredicate = new TupleDomainParquetPredicate(parquetTupleDomain, candidateColumns.get(), timeZone);
+        Predicate indexPredicate = new TupleDomainParquetPredicate(parquetTupleDomain, candidateColumns.get(), timeZone, domainCompactionThreshold);
 
         // Page stats is finer grained but relatively more expensive, so we do the filtering after above block filtering.
         if (columnIndexStore.isPresent() && !indexPredicate.matches(block.getRowCount(), columnIndexStore.get(), dataSource.getId())) {
+            return false;
+        }
+
+        if (bloomFilterStore.isPresent() && !indexPredicate.matches(bloomFilterStore.get())) {
             return false;
         }
 

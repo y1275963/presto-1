@@ -215,6 +215,69 @@ public class TestHiveSparkCompatibility
     }
 
     @Test(groups = {HIVE_SPARK, PROFILE_SPECIFIC_TESTS})
+    public void testSparkParquetBloomFilterCompatibility()
+    {
+        String sparkTableNameWithBloomFilter = "test_spark_parquet_bloom_filter_compatibility_enabled_" + randomNameSuffix();
+        String sparkTableNameNoBloomFilter = "test_spark_parquet_bloom_filter_compatibility_disabled_" + randomNameSuffix();
+
+        // disable dictionary predicate when testing bloom filter predicate
+        onSpark().executeQuery(
+                String.format("CREATE TABLE %s (testInteger INT, testString STRING, testDouble DOUBLE, testFloat FLOAT) ", sparkTableNameWithBloomFilter) +
+                        "USING PARQUET OPTIONS (" +
+                        "'parquet.bloom.filter.enabled'='true'," +
+                        "'parquet.enable.dictionary'='false'" +
+                        ")");
+        onSpark().executeQuery(
+                String.format("CREATE TABLE %s (testInteger INT, testString STRING, testDouble DOUBLE, testFloat FLOAT) ", sparkTableNameNoBloomFilter) +
+                        "USING PARQUET OPTIONS (" +
+                        "'parquet.bloom.filter.enabled'='false'," +
+                        "'parquet.enable.dictionary'='false'" +
+                        ")");
+        String[] sparkTables = new String[] {sparkTableNameWithBloomFilter, sparkTableNameNoBloomFilter};
+        String[] trinoTables = new String[] {
+                format("%s.default.%s", TRINO_CATALOG, sparkTableNameWithBloomFilter),
+                format("%s.default.%s", TRINO_CATALOG, sparkTableNameNoBloomFilter)};
+
+        // control number of spark output files via hint: https://issues.apache.org/jira/browse/SPARK-24940
+        // contain values such as aaaaaaaaaaa and zzzzzzzzzzz, this made sure file level statistics: min and max won't take effect
+        for (String sparkTable : sparkTables) {
+            onSpark().executeQuery(format(
+                    "INSERT INTO %s " +
+                            "SELECT /*+ REPARTITION(1) */  testInteger, testString, testDouble, testFloat FROM VALUES " +
+                            "  (-999999, 'aaaaaaaaaaa', -9999999999.99D, -9999999.9999F)" +
+                            ", (3, 'fdsvxxbv33cb', 97662.2D, 98862.2F)" +
+                            ", (54, 'hhghhr3bvcbvc', -97232.2D, 9123532.2F)" +
+                            ", (34, 'ddbvecxdvcbvcd', 6679.4D, 234379.4F)" +
+                            ", (5324, 'refgfdfrexx', 8796.1D, -65496.1F)" +
+                            ", (999999, 'zzzzzzzzzzz', 9999999999.99D, -9999999.9999F)" +
+                            ", (9444, 'ff34322vxff', 32137758.7892D, 9978.129887F) AS DATA(testInteger, testString, testDouble, testFloat)",
+                    sparkTable));
+        }
+
+        // explicitly make sure using bloom filter statistics
+        onTrino().executeQuery("set session hive.parquet_use_bloom_filter=true");
+        assertTrinoBloomFilterTableSelectResult(trinoTables);
+
+        // explicitly make sure not using bloom filter statistics
+        onTrino().executeQuery("set session hive.parquet_use_bloom_filter=false");
+        assertTrinoBloomFilterTableSelectResult(trinoTables);
+
+        for (String sparkTable : sparkTables) {
+            onSpark().executeQuery("DROP TABLE " + sparkTable);
+        }
+    }
+
+    private static void assertTrinoBloomFilterTableSelectResult(String[] trinoTables)
+    {
+        for (String trinoTable : trinoTables) {
+            assertThat(onTrino().executeQuery("SELECT COUNT(*) FROM " + trinoTable + " WHERE testString IN ('fdsvxxbv33cb', 'cxxx322', 'cxxx323')")).containsOnly(List.of(row(1)));
+            assertThat(onTrino().executeQuery("SELECT COUNT(*) FROM " + trinoTable + " WHERE testInteger IN (5324, -88777, 6711111)")).containsOnly(List.of(row(1)));
+            assertThat(onTrino().executeQuery("SELECT COUNT(*) FROM " + trinoTable + " WHERE testDouble IN (DOUBLE '6679.4', DOUBLE '-97221.2', DOUBLE '-88777.22233')")).containsOnly(List.of(row(1)));
+            assertThat(onTrino().executeQuery("SELECT COUNT(*) FROM " + trinoTable + " WHERE testFloat IN (REAL '-65496.1', REAL '98862.2', REAL '6761111555.1222')")).containsOnly(List.of(row(2)));
+        }
+    }
+
+    @Test(groups = {HIVE_SPARK, PROFILE_SPECIFIC_TESTS})
     public void testInsertFailsOnBucketedTableCreatedBySpark()
     {
         String hiveTableName = "spark_insert_bucketed_table_" + randomNameSuffix();
@@ -262,7 +325,7 @@ public class TestHiveSparkCompatibility
         onSpark().executeQuery("DROP TABLE " + hiveTableName);
     }
 
-    private static final String[] HIVE_TIMESTAMP_PRECISIONS = new String[]{"MILLISECONDS", "MICROSECONDS", "NANOSECONDS"};
+    private static final String[] HIVE_TIMESTAMP_PRECISIONS = new String[] {"MILLISECONDS", "MICROSECONDS", "NANOSECONDS"};
 
     @DataProvider
     public static Object[][] sparkParquetTimestampFormats()
@@ -273,10 +336,10 @@ public class TestHiveSparkCompatibility
 
         // Ordering of expected values matches the ordering in HIVE_TIMESTAMP_PRECISIONS
         return new Object[][] {
-                {"TIMESTAMP_MILLIS", millisTimestamp, new String[]{millisTimestamp, millisTimestamp, millisTimestamp}},
-                {"TIMESTAMP_MICROS", microsTimestamp, new String[]{millisTimestamp, microsTimestamp, microsTimestamp}},
+                {"TIMESTAMP_MILLIS", millisTimestamp, new String[] {millisTimestamp, millisTimestamp, millisTimestamp}},
+                {"TIMESTAMP_MICROS", microsTimestamp, new String[] {millisTimestamp, microsTimestamp, microsTimestamp}},
                 // note that Spark timestamp has microsecond precision
-                {"INT96", nanosTimestamp, new String[]{millisTimestamp, microsTimestamp, microsTimestamp}},
+                {"INT96", nanosTimestamp, new String[] {millisTimestamp, microsTimestamp, microsTimestamp}},
         };
     }
 

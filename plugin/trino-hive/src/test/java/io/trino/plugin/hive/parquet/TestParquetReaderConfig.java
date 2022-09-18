@@ -36,7 +36,8 @@ public class TestParquetReaderConfig
                 .setMaxMergeDistance(DataSize.of(1, MEGABYTE))
                 .setMaxBufferSize(DataSize.of(8, MEGABYTE))
                 .setUseColumnIndex(true)
-                .setOptimizedReaderEnabled(true));
+                .setOptimizedReaderEnabled(true)
+                .setUseBloomFilter(true));
     }
 
     @Test
@@ -49,6 +50,7 @@ public class TestParquetReaderConfig
                 .put("parquet.max-merge-distance", "342kB")
                 .put("parquet.use-column-index", "false")
                 .put("parquet.optimized-reader.enabled", "false")
+                .put("parquet.use-bloom-filter", "false")
                 .buildOrThrow();
 
         ParquetReaderConfig expected = new ParquetReaderConfig()
@@ -57,7 +59,8 @@ public class TestParquetReaderConfig
                 .setMaxBufferSize(DataSize.of(1431, KILOBYTE))
                 .setMaxMergeDistance(DataSize.of(342, KILOBYTE))
                 .setUseColumnIndex(false)
-                .setOptimizedReaderEnabled(false);
+                .setOptimizedReaderEnabled(false)
+                .setUseBloomFilter(false);
 
         assertFullMapping(properties, expected);
     }

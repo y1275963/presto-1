@@ -13,6 +13,7 @@
  */
 package io.trino.parquet.predicate;
 
+import io.trino.parquet.BloomFilterStore;
 import io.trino.parquet.ParquetCorruptionException;
 import io.trino.parquet.ParquetDataSourceId;
 import org.apache.parquet.column.ColumnDescriptor;
@@ -30,17 +31,16 @@ public interface Predicate
     /**
      * Should the Parquet Reader process a file section with the specified statistics,
      * and if it should, then return the columns are candidates for further inspection of more
-     * granular statistics from column index and dictionary.
+     * granular statistics from column index, bloom filter and dictionary
      *
      * @param numberOfRows the number of rows in the segment; this can be used with
      * Statistics to determine if a column is only null
      * @param statistics column statistics
      * @param id Parquet file name
-     *
      * @return Optional.empty() if statistics were sufficient to eliminate the file section.
      * Otherwise, a list of columns for which page-level indices and dictionary could be consulted
      * to potentially eliminate the file section. An optional with empty list is returned if there is
-     * going to be no benefit in looking at column index or dictionary for any column.
+     * going to be no benefit in looking at column index, bloom filter or dictionary for any column.
      */
     Optional<List<ColumnDescriptor>> getIndexLookupCandidates(long numberOfRows, Map<ColumnDescriptor, Statistics<?>> statistics, ParquetDataSourceId id)
             throws ParquetCorruptionException;
@@ -64,6 +64,14 @@ public interface Predicate
      */
     boolean matches(long numberOfRows, ColumnIndexStore columnIndex, ParquetDataSourceId id)
             throws ParquetCorruptionException;
+
+    /**
+     * Should the Parquet Reader process a file section with bloom filter statistics.
+     *
+     * @param bloomFilterStore bloom filter store
+     * @return return true if the bloomfilter store might match with the predicate, return false if the bloomfilter absolutely doesn't match with the predicate
+     */
+    boolean matches(BloomFilterStore bloomFilterStore);
 
     /**
      * Convert Predicate to Parquet filter if possible.
