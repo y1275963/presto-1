@@ -72,6 +72,7 @@ import static org.testng.Assert.assertNull;
 
 public class TestDeltaLakeFileStatistics
 {
+    private static final int DOMAIN_COMPACTION_THRESHOLD = 32;
     private final ObjectMapper objectMapper = new ObjectMapperProvider().get();
 
     @Test
@@ -105,7 +106,8 @@ public class TestDeltaLakeFileStatistics
                 Optional.empty(),
                 new FileFormatDataSourceStats(),
                 new ParquetReaderConfig().toParquetReaderOptions(),
-                true);
+                true,
+                DOMAIN_COMPACTION_THRESHOLD);
         MetadataEntry metadataEntry = getOnlyElement(metadataEntryIterator).getMetaData();
 
         CheckpointEntryIterator checkpointEntryIterator = new CheckpointEntryIterator(
@@ -118,7 +120,8 @@ public class TestDeltaLakeFileStatistics
                 Optional.of(metadataEntry),
                 new FileFormatDataSourceStats(),
                 new ParquetReaderConfig().toParquetReaderOptions(),
-                true);
+                true,
+                DOMAIN_COMPACTION_THRESHOLD);
         DeltaLakeTransactionLogEntry matchingAddFileEntry = null;
         while (checkpointEntryIterator.hasNext()) {
             DeltaLakeTransactionLogEntry entry = checkpointEntryIterator.next();

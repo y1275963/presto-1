@@ -18,6 +18,7 @@ import com.google.common.base.VerifyException;
 import com.google.common.collect.ImmutableList;
 import io.airlift.slice.Slice;
 import io.airlift.slice.Slices;
+import io.trino.parquet.BloomFilterStore;
 import io.trino.parquet.DictionaryPage;
 import io.trino.parquet.ParquetCorruptionException;
 import io.trino.parquet.ParquetDataSourceId;
@@ -27,13 +28,17 @@ import io.trino.spi.predicate.Domain;
 import io.trino.spi.predicate.Range;
 import io.trino.spi.predicate.TupleDomain;
 import io.trino.spi.predicate.ValueSet;
+import io.trino.spi.type.CharType;
 import io.trino.spi.type.DecimalType;
 import io.trino.spi.type.Int128;
 import io.trino.spi.type.TimestampType;
 import io.trino.spi.type.Type;
+import io.trino.spi.type.UuidType;
+import io.trino.spi.type.VarbinaryType;
 import io.trino.spi.type.VarcharType;
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.statistics.Statistics;
+import org.apache.parquet.column.values.bloomfilter.BloomFilter;
 import org.apache.parquet.filter2.predicate.FilterApi;
 import org.apache.parquet.filter2.predicate.FilterPredicate;
 import org.apache.parquet.filter2.predicate.Operators;
@@ -50,6 +55,7 @@ import org.joda.time.DateTimeZone;
 import java.io.Serializable;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -70,6 +76,8 @@ import static io.trino.spi.type.RealType.REAL;
 import static io.trino.spi.type.SmallintType.SMALLINT;
 import static io.trino.spi.type.TinyintType.TINYINT;
 import static java.lang.Float.floatToRawIntBits;
+import static java.lang.Float.intBitsToFloat;
+import static java.lang.Math.toIntExact;
 import static java.lang.String.format;
 import static java.nio.ByteOrder.LITTLE_ENDIAN;
 import static java.util.Objects.requireNonNull;
@@ -82,12 +90,18 @@ public class TupleDomainParquetPredicate
     private final TupleDomain<ColumnDescriptor> effectivePredicate;
     private final List<ColumnDescriptor> columns;
     private final DateTimeZone timeZone;
+    private final int domainCompactionThreshold;
 
-    public TupleDomainParquetPredicate(TupleDomain<ColumnDescriptor> effectivePredicate, List<ColumnDescriptor> columns, DateTimeZone timeZone)
+    public TupleDomainParquetPredicate(
+            TupleDomain<ColumnDescriptor> effectivePredicate,
+            List<ColumnDescriptor> columns,
+            DateTimeZone timeZone,
+            int domainCompactionThreshold)
     {
         this.effectivePredicate = requireNonNull(effectivePredicate, "effectivePredicate is null");
         this.columns = ImmutableList.copyOf(requireNonNull(columns, "columns is null"));
         this.timeZone = requireNonNull(timeZone, "timeZone is null");
+        this.domainCompactionThreshold = domainCompactionThreshold;
     }
 
     @Override
@@ -149,6 +163,78 @@ public class TupleDomainParquetPredicate
         Domain effectivePredicateDomain = effectivePredicateDomains.get(dictionary.getColumnDescriptor());
 
         return effectivePredicateDomain == null || effectivePredicateMatches(effectivePredicateDomain, dictionary);
+    }
+
+    private Optional<Collection<Object>> extractDiscreteValues(ValueSet valueSet)
+    {
+        if (!valueSet.isDiscreteSet()) {
+            return valueSet.tryExpandRanges(domainCompactionThreshold);
+        }
+
+        return Optional.of(valueSet.getDiscreteSet());
+    }
+
+    @Override
+    public boolean matches(ColumnDescriptor columnDescriptor, ColumnPath columnPath, BloomFilterStore bloomFilterStore)
+    {
+        requireNonNull(bloomFilterStore, "bloomFilterStore is null");
+
+        if (effectivePredicate.isNone()) {
+            return false;
+        }
+        Map<ColumnDescriptor, Domain> effectivePredicateDomains = effectivePredicate.getDomains()
+                .orElseThrow(() -> new IllegalStateException("Effective predicate other than none should have domains"));
+
+        if (!effectivePredicateDomains.containsKey(columnDescriptor)) {
+            return true;
+        }
+
+        Domain effectivePredicateDomain = effectivePredicateDomains.get(columnDescriptor);
+        // the bloom filter bitset contains only non-null values so isn't helpful
+        if (effectivePredicateDomain.isNullAllowed()) {
+            return true;
+        }
+        Optional<BloomFilter> bloomFilterOptional = bloomFilterStore.readBloomFilter(columnPath);
+        if (!bloomFilterOptional.isPresent()) {
+            return true;
+        }
+
+        Optional<Collection<Object>> discreteValues = extractDiscreteValues(effectivePredicateDomain.getValues());
+        if (discreteValues.isEmpty()) {
+            // values are not discrete, so bloom filter isn't helpful
+            return true;
+        }
+        BloomFilter bloomFilter = bloomFilterOptional.get();
+
+        return discreteValues.get().stream().anyMatch(value -> checkInBloomFilter(bloomFilter, value, effectivePredicateDomain.getType()));
+    }
+
+    /**
+     * Check if the predicateValue might be in the bloomfilter
+     *
+     * @param bloomFilter parquet bloomfilter.
+     * @param predicateValue effective discrete predicate value.
+     * @param sqlType Type that contains information about the type schema from connector's metadata
+     * @return true if the predicateValue might be in the bloomfilter, false if the predicateValue absolutely is not in the bloomfilter
+     */
+    private static boolean checkInBloomFilter(BloomFilter bloomFilter, Object predicateValue, Type sqlType)
+    {
+        // todo: support TIMESTAMP, and DECIMAL
+        if (sqlType == TINYINT || sqlType == SMALLINT || sqlType == INTEGER || sqlType == BIGINT || sqlType == DATE) {
+            return bloomFilter.findHash(bloomFilter.hash(asLong(predicateValue)));
+        }
+        else if (sqlType == DOUBLE) {
+            return bloomFilter.findHash(bloomFilter.hash(predicateValue));
+        }
+        else if (sqlType == REAL) {
+            return bloomFilter.findHash(bloomFilter.hash(intBitsToFloat(toIntExact(((Number) predicateValue).intValue()))));
+        }
+        else if (sqlType instanceof VarcharType || sqlType instanceof CharType || sqlType instanceof VarbinaryType || sqlType instanceof UuidType) {
+            return bloomFilter.findHash(bloomFilter.hash(Binary.fromConstantByteBuffer(((Slice) predicateValue).toByteBuffer())));
+        }
+        else {
+            return true;
+        }
     }
 
     @Override

@@ -455,7 +455,7 @@ public class TestHiveFileFormats
                 .withSession(session)
                 .withColumns(testColumns)
                 .withRowsCount(rowCount)
-                .withFileWriterFactory(new ParquetFileWriterFactory(HDFS_ENVIRONMENT, new NodeVersion("test-version"), TESTING_TYPE_MANAGER, new HiveConfig(), STATS))
+                .withFileWriterFactory(new ParquetFileWriterFactory(FILE_SYSTEM_FACTORY, new NodeVersion("test-version"), TESTING_TYPE_MANAGER, new HiveConfig(), STATS))
                 .isReadableByPageSource(PARQUET_PAGE_SOURCE_FACTORY);
     }
 

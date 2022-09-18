@@ -13,9 +13,10 @@
  */
 package io.trino.plugin.hive.parquet;
 
-import io.trino.hdfs.HdfsEnvironment;
+import io.trino.filesystem.TrinoFileSystem;
+import io.trino.filesystem.TrinoFileSystemFactory;
+import io.trino.filesystem.TrinoInputFile;
 import io.trino.parquet.ParquetDataSource;
-import io.trino.parquet.ParquetDataSourceId;
 import io.trino.parquet.ParquetReaderOptions;
 import io.trino.parquet.writer.ParquetSchemaConverter;
 import io.trino.parquet.writer.ParquetWriterOptions;
@@ -32,7 +33,6 @@ import io.trino.spi.TrinoException;
 import io.trino.spi.connector.ConnectorSession;
 import io.trino.spi.type.Type;
 import io.trino.spi.type.TypeManager;
-import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat;
 import org.apache.hadoop.mapred.JobConf;
@@ -66,7 +66,7 @@ import static java.util.stream.Collectors.toList;
 public class ParquetFileWriterFactory
         implements HiveFileWriterFactory
 {
-    private final HdfsEnvironment hdfsEnvironment;
+    private final TrinoFileSystemFactory fileSystemFactory;
     private final NodeVersion nodeVersion;
     private final TypeManager typeManager;
     private final DateTimeZone parquetTimeZone;
@@ -74,13 +74,13 @@ public class ParquetFileWriterFactory
 
     @Inject
     public ParquetFileWriterFactory(
-            HdfsEnvironment hdfsEnvironment,
+            TrinoFileSystemFactory fileSystemFactory,
             NodeVersion nodeVersion,
             TypeManager typeManager,
             HiveConfig hiveConfig,
             FileFormatDataSourceStats readStats)
     {
-        this.hdfsEnvironment = requireNonNull(hdfsEnvironment, "hdfsEnvironment is null");
+        this.fileSystemFactory = requireNonNull(fileSystemFactory, "fileSystemFactory is null");
         this.nodeVersion = requireNonNull(nodeVersion, "nodeVersion is null");
         this.typeManager = requireNonNull(typeManager, "typeManager is null");
         this.parquetTimeZone = hiveConfig.getParquetDateTimeZone();
@@ -126,10 +126,10 @@ public class ParquetFileWriterFactory
                 .toArray();
 
         try {
-            FileSystem fileSystem = hdfsEnvironment.getFileSystem(session.getIdentity(), path, conf);
+            TrinoFileSystem fileSystem = fileSystemFactory.create(session);
 
             Callable<Void> rollbackAction = () -> {
-                fileSystem.delete(path, false);
+                fileSystem.deleteFile(path.toString());
                 return null;
             };
 
@@ -143,12 +143,12 @@ public class ParquetFileWriterFactory
             if (isParquetOptimizedWriterValidate(session)) {
                 validationInputFactory = Optional.of(() -> {
                     try {
-                        return new HdfsParquetDataSource(
-                                new ParquetDataSourceId(path.toString()),
-                                fileSystem.getFileStatus(path).getLen(),
-                                fileSystem.open(path),
-                                readStats,
-                                new ParquetReaderOptions());
+                        TrinoInputFile inputfile = fileSystem.newInputFile(path.toString());
+
+                        return new TrinoParquetDataSource(
+                                inputfile,
+                                new ParquetReaderOptions(),
+                                readStats);
                     }
                     catch (IOException e) {
                         throw new TrinoException(HIVE_WRITE_VALIDATION_FAILED, e);
@@ -157,7 +157,7 @@ public class ParquetFileWriterFactory
             }
 
             return Optional.of(new ParquetFileWriter(
-                    fileSystem.create(path, false),
+                    fileSystem.newOutputFile(path.toString()).create(),
                     rollbackAction,
                     fileColumnTypes,
                     fileColumnNames,

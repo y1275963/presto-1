@@ -94,6 +94,7 @@ public class DeltaLakeMergeSink
     private final ConnectorPageSink insertPageSink;
     private final List<DeltaLakeColumnHandle> dataColumns;
     private final int tableColumnCount;
+    private final int domainCompactionThreshold;
     private final Map<Slice, FileDeletion> fileDeletions = new HashMap<>();
 
     public DeltaLakeMergeSink(
@@ -107,7 +108,8 @@ public class DeltaLakeMergeSink
             DeltaLakeWriterStats writerStats,
             String rootTableLocation,
             ConnectorPageSink insertPageSink,
-            List<DeltaLakeColumnHandle> tableColumns)
+            List<DeltaLakeColumnHandle> tableColumns,
+            int domainCompactionThreshold)
     {
         this.fileSystemFactory = requireNonNull(fileSystemFactory, "fileSystemFactory is null");
         this.hdfsEnvironment = requireNonNull(hdfsEnvironment, "hdfsEnvironment is null");
@@ -124,6 +126,7 @@ public class DeltaLakeMergeSink
         this.dataColumns = tableColumns.stream()
                 .filter(column -> column.getColumnType() == REGULAR)
                 .collect(toImmutableList());
+        this.domainCompactionThreshold = domainCompactionThreshold;
     }
 
     @Override
@@ -314,7 +317,8 @@ public class DeltaLakeMergeSink
                 parquetDateTimeZone,
                 new FileFormatDataSourceStats(),
                 new ParquetReaderOptions(),
-                Optional.empty());
+                Optional.empty(),
+                domainCompactionThreshold);
     }
 
     private static class FileDeletion

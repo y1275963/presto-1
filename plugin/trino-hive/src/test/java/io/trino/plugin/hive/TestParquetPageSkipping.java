@@ -38,7 +38,7 @@ public class TestParquetPageSkipping
                 .setHiveProperties(
                         ImmutableMap.of(
                                 "parquet.use-column-index", "true",
-                                // Small max-buffer-size allows testing mix of small and large ranges in HdfsParquetDataSource#planRead
+                                // Small max-buffer-size allows testing mix of small and large ranges in AbstractParquetDataSource#planRead
                                 "parquet.max-buffer-size", "400B"))
                 .build();
     }

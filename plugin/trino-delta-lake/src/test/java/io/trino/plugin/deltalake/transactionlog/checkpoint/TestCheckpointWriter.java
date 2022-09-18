@@ -74,6 +74,7 @@ import static org.testng.Assert.assertEquals;
 public class TestCheckpointWriter
 {
     private final TypeManager typeManager = TESTING_TYPE_MANAGER;
+    private static final int DOMAIN_COMPACTION_THRESHOLD = 32;
     private CheckpointSchemaManager checkpointSchemaManager;
 
     @BeforeClass
@@ -494,7 +495,8 @@ public class TestCheckpointWriter
                 Optional.of(metadataEntry),
                 new FileFormatDataSourceStats(),
                 new ParquetReaderConfig().toParquetReaderOptions(),
-                rowStatisticsEnabled);
+                rowStatisticsEnabled,
+                DOMAIN_COMPACTION_THRESHOLD);
 
         CheckpointBuilder checkpointBuilder = new CheckpointBuilder();
         while (checkpointEntryIterator.hasNext()) {

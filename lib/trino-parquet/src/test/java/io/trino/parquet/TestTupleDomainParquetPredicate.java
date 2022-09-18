@@ -39,9 +39,15 @@ import org.apache.parquet.column.statistics.FloatStatistics;
 import org.apache.parquet.column.statistics.IntStatistics;
 import org.apache.parquet.column.statistics.LongStatistics;
 import org.apache.parquet.column.statistics.Statistics;
+import org.apache.parquet.column.values.bloomfilter.BlockSplitBloomFilter;
+import org.apache.parquet.column.values.bloomfilter.BloomFilter;
+import org.apache.parquet.hadoop.metadata.BlockMetaData;
+import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
+import org.apache.parquet.hadoop.metadata.ColumnPath;
 import org.apache.parquet.internal.column.columnindex.BoundaryOrder;
 import org.apache.parquet.internal.column.columnindex.ColumnIndex;
 import org.apache.parquet.internal.column.columnindex.ColumnIndexBuilder;
+import org.apache.parquet.io.api.Binary;
 import org.apache.parquet.schema.LogicalTypeAnnotation;
 import org.apache.parquet.schema.LogicalTypeAnnotation.TimeUnit;
 import org.apache.parquet.schema.PrimitiveType;
@@ -50,6 +56,7 @@ import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.math.BigInteger;
 import java.math.RoundingMode;
 import java.nio.ByteBuffer;
@@ -57,6 +64,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -100,6 +108,7 @@ import static java.time.temporal.ChronoField.MICRO_OF_SECOND;
 import static java.util.Arrays.asList;
 import static java.util.Collections.singletonList;
 import static java.util.Collections.singletonMap;
+import static java.util.Objects.requireNonNull;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName;
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.BINARY;
@@ -120,6 +129,7 @@ import static org.testng.Assert.assertTrue;
 public class TestTupleDomainParquetPredicate
 {
     private static final ParquetDataSourceId ID = new ParquetDataSourceId("testFile");
+    private static final int DEFAULT_DOMAIN_COMPACTION_THRESHOLD = 32;
 
     @Test
     public void testBoolean()
@@ -457,7 +467,7 @@ public class TestTupleDomainParquetPredicate
                 .as(LogicalTypeAnnotation.timestampType(false, timeUnit))
                 .named("TimestampColumn");
 
-        ColumnDescriptor columnDescriptor = new ColumnDescriptor(new String[]{}, type, 0, 0);
+        ColumnDescriptor columnDescriptor = new ColumnDescriptor(new String[] {}, type, 0, 0);
         TimestampType timestampType = createTimestampType(precision);
         assertEquals(getDomain(columnDescriptor, timestampType, 0, null, ID, UTC), all(timestampType));
         LocalDateTime maxTime = baseTime.plus(Duration.ofMillis(50));
@@ -548,7 +558,7 @@ public class TestTupleDomainParquetPredicate
         String value = "Test";
         ColumnDescriptor column = createColumnDescriptor(BINARY, "VarcharColumn");
         TupleDomain<ColumnDescriptor> effectivePredicate = getEffectivePredicate(column, createVarcharType(255), utf8Slice(value));
-        TupleDomainParquetPredicate parquetPredicate = new TupleDomainParquetPredicate(effectivePredicate, singletonList(column), UTC);
+        TupleDomainParquetPredicate parquetPredicate = new TupleDomainParquetPredicate(effectivePredicate, singletonList(column), UTC, DEFAULT_DOMAIN_COMPACTION_THRESHOLD);
         PrimitiveType type = column.getPrimitiveType();
         Statistics<?> stats = Statistics.getBuilderForReading(type)
                 .withMin(value.getBytes(UTF_8))
@@ -567,7 +577,7 @@ public class TestTupleDomainParquetPredicate
         TupleDomain<ColumnDescriptor> effectivePredicate = TupleDomain.withColumnDomains(ImmutableMap.of(
                 column,
                 Domain.create(ValueSet.of(typeForParquetInt32, 42L, 43L, 44L, 112L), false)));
-        TupleDomainParquetPredicate parquetPredicate = new TupleDomainParquetPredicate(effectivePredicate, singletonList(column), UTC);
+        TupleDomainParquetPredicate parquetPredicate = new TupleDomainParquetPredicate(effectivePredicate, singletonList(column), UTC, DEFAULT_DOMAIN_COMPACTION_THRESHOLD);
 
         assertThat(parquetPredicate.getIndexLookupCandidates(2, ImmutableMap.of(column, intColumnStats(32, 42)), ID))
                 .isEqualTo(Optional.of(ImmutableList.of(column)));
@@ -594,7 +604,7 @@ public class TestTupleDomainParquetPredicate
         TupleDomain<ColumnDescriptor> effectivePredicate = TupleDomain.withColumnDomains(ImmutableMap.of(
                 column,
                 Domain.create(ValueSet.of(BIGINT, 42L, 43L, 44L, 404L), false)));
-        TupleDomainParquetPredicate parquetPredicate = new TupleDomainParquetPredicate(effectivePredicate, singletonList(column), UTC);
+        TupleDomainParquetPredicate parquetPredicate = new TupleDomainParquetPredicate(effectivePredicate, singletonList(column), UTC, DEFAULT_DOMAIN_COMPACTION_THRESHOLD);
 
         assertThat(parquetPredicate.getIndexLookupCandidates(2, ImmutableMap.of(column, longColumnStats(32, 42)), ID))
                 .isEqualTo(Optional.of(ImmutableList.of(column)));
@@ -607,7 +617,7 @@ public class TestTupleDomainParquetPredicate
     {
         ColumnDescriptor column = new ColumnDescriptor(new String[] {"path"}, Types.optional(BINARY).named("Test column"), 0, 0);
         TupleDomain<ColumnDescriptor> effectivePredicate = getEffectivePredicate(column, createVarcharType(255), EMPTY_SLICE);
-        TupleDomainParquetPredicate parquetPredicate = new TupleDomainParquetPredicate(effectivePredicate, singletonList(column), UTC);
+        TupleDomainParquetPredicate parquetPredicate = new TupleDomainParquetPredicate(effectivePredicate, singletonList(column), UTC, DEFAULT_DOMAIN_COMPACTION_THRESHOLD);
         DictionaryPage page = new DictionaryPage(Slices.wrappedBuffer(new byte[] {0, 0, 0, 0}), 1, PLAIN_DICTIONARY);
         assertTrue(parquetPredicate.matches(new DictionaryDescriptor(column, true, Optional.of(page))));
         assertTrue(parquetPredicate.matches(new DictionaryDescriptor(column, false, Optional.of(page))));
@@ -615,7 +625,7 @@ public class TestTupleDomainParquetPredicate
         effectivePredicate = withColumnDomains(ImmutableMap.of(
                 column,
                 singleValue(createVarcharType(255), Slices.utf8Slice("abc"), true)));
-        parquetPredicate = new TupleDomainParquetPredicate(effectivePredicate, singletonList(column), UTC);
+        parquetPredicate = new TupleDomainParquetPredicate(effectivePredicate, singletonList(column), UTC, DEFAULT_DOMAIN_COMPACTION_THRESHOLD);
         assertTrue(parquetPredicate.matches(new DictionaryDescriptor(column, true, Optional.of(page))));
         assertFalse(parquetPredicate.matches(new DictionaryDescriptor(column, false, Optional.of(page))));
     }
@@ -634,7 +644,8 @@ public class TestTupleDomainParquetPredicate
         predicate = new TupleDomainParquetPredicate(
                 withColumnDomains(singletonMap(descriptor, notNull(type))),
                 singletonList(column),
-                UTC);
+                UTC,
+                DEFAULT_DOMAIN_COMPACTION_THRESHOLD);
         assertFalse(predicate.matches(new DictionaryDescriptor(column, true, Optional.of(dictionary))));
         assertFalse(predicate.matches(new DictionaryDescriptor(column, false, Optional.of(dictionary))));
 
@@ -642,7 +653,8 @@ public class TestTupleDomainParquetPredicate
         predicate = new TupleDomainParquetPredicate(
                 withColumnDomains(singletonMap(descriptor, onlyNull(type))),
                 singletonList(column),
-                UTC);
+                UTC,
+                DEFAULT_DOMAIN_COMPACTION_THRESHOLD);
         assertTrue(predicate.matches(new DictionaryDescriptor(column, true, Optional.of(dictionary))));
         assertFalse(predicate.matches(new DictionaryDescriptor(column, false, Optional.of(dictionary))));
 
@@ -650,7 +662,8 @@ public class TestTupleDomainParquetPredicate
         predicate = new TupleDomainParquetPredicate(
                 withColumnDomains(singletonMap(descriptor, singleValue(type, EMPTY_SLICE, true))),
                 singletonList(column),
-                UTC);
+                UTC,
+                DEFAULT_DOMAIN_COMPACTION_THRESHOLD);
         assertTrue(predicate.matches(new DictionaryDescriptor(column, true, Optional.of(dictionary))));
         assertFalse(predicate.matches(new DictionaryDescriptor(column, false, Optional.of(dictionary))));
     }
@@ -667,13 +680,13 @@ public class TestTupleDomainParquetPredicate
                 columnB,
                 Domain.create(ValueSet.ofRanges(range(BIGINT, 42L, true, 404L, true)), false)));
 
-        TupleDomainParquetPredicate parquetPredicate = new TupleDomainParquetPredicate(effectivePredicate, singletonList(columnA), UTC);
+        TupleDomainParquetPredicate parquetPredicate = new TupleDomainParquetPredicate(effectivePredicate, singletonList(columnA), UTC, DEFAULT_DOMAIN_COMPACTION_THRESHOLD);
         assertThat(parquetPredicate.getIndexLookupCandidates(
                 2,
                 ImmutableMap.of(columnA, longColumnStats(32, 42), columnB, longColumnStats(42, 500)), ID))
                 .isEqualTo(Optional.of(ImmutableList.of(columnA)));
 
-        parquetPredicate = new TupleDomainParquetPredicate(effectivePredicate, ImmutableList.of(columnA, columnB), UTC);
+        parquetPredicate = new TupleDomainParquetPredicate(effectivePredicate, ImmutableList.of(columnA, columnB), UTC, DEFAULT_DOMAIN_COMPACTION_THRESHOLD);
         // column stats missing on columnB
         assertThat(parquetPredicate.getIndexLookupCandidates(2, ImmutableMap.of(columnA, longColumnStats(32, 42)), ID))
                 .isEqualTo(Optional.of(ImmutableList.of(columnA, columnB)));
@@ -711,9 +724,46 @@ public class TestTupleDomainParquetPredicate
                         true));
     }
 
+    @Test
+    public void testVarcharMatchesWithBloomFilter()
+    {
+        int bloomFilterNumBytes = 10000;
+        String columnName = "path";
+        ColumnPath columnPath = ColumnPath.fromDotString(columnName);
+        VarcharType columnType = createVarcharType(255);
+        ColumnDescriptor columnDescriptor = new ColumnDescriptor(new String[] {columnName}, Types.optional(BINARY).named("Test column"), 0, 0);
+
+        BloomFilter bloomFilter = new BlockSplitBloomFilter(bloomFilterNumBytes);
+
+        String testColumnValueExist = "test Predicate Value";
+        Slice testColumnValueExistSlice = Slices.utf8Slice(testColumnValueExist);
+        long testColumnValueExistHash = getBloomFilterHash(bloomFilter, testColumnValueExistSlice, columnType);
+        bloomFilter.insertHash(testColumnValueExistHash);
+        TupleDomainParquetPredicate testColumnValueExistPredicate = createTupleDomainParquetPredicate(columnDescriptor, columnType, testColumnValueExistSlice);
+
+        String testColumnValueNonExist = "test Predicate Value Non exist";
+        Slice testColumnValueNonExistSlice = Slices.utf8Slice(testColumnValueNonExist);
+        TupleDomainParquetPredicate testColumnValueNonExistPredicate = createTupleDomainParquetPredicate(columnDescriptor, columnType, testColumnValueNonExistSlice);
+
+        BloomFilterStore bloomFilterStore = new MockBloomFilterStore(ImmutableMap.of(columnPath, bloomFilter));
+        assertTrue(testColumnValueExistPredicate.matches(columnDescriptor, columnPath, bloomFilterStore));
+        assertFalse(testColumnValueNonExistPredicate.matches(columnDescriptor, columnPath, bloomFilterStore));
+
+        assertTrue(testColumnValueNonExistPredicate.matches(
+                new ColumnDescriptor(new String[] {"non_exist_path"}, Types.optional(BINARY).named("Test column"), 0, 0),
+                ColumnPath.fromDotString("non_exist_path"),
+                bloomFilterStore));
+    }
+
+    private TupleDomainParquetPredicate createTupleDomainParquetPredicate(ColumnDescriptor column, VarcharType columnType, Slice predicateValue)
+    {
+        TupleDomain<ColumnDescriptor> effectivePredicate = getEffectivePredicate(column, columnType, predicateValue);
+        return new TupleDomainParquetPredicate(effectivePredicate, singletonList(column), UTC, DEFAULT_DOMAIN_COMPACTION_THRESHOLD);
+    }
+
     private ColumnDescriptor createColumnDescriptor(PrimitiveTypeName typeName, String columnName)
     {
-        return new ColumnDescriptor(new String[]{}, new PrimitiveType(REQUIRED, typeName, columnName), 0, 0);
+        return new ColumnDescriptor(new String[] {}, new PrimitiveType(REQUIRED, typeName, columnName), 0, 0);
     }
 
     private TupleDomain<ColumnDescriptor> getEffectivePredicate(ColumnDescriptor column, VarcharType type, Slice value)
@@ -841,5 +891,47 @@ public class TestTupleDomainParquetPredicate
             }
         }
         return buffers;
+    }
+
+    private static class MockBloomFilterStore
+            extends BloomFilterStore
+    {
+        final Map<ColumnPath, BloomFilter> bloomFilterMap;
+
+        MockBloomFilterStore(Map<ColumnPath, BloomFilter> bloomFilterMap)
+        {
+            super(new MockParquetDataSource(), new BlockMetaData(), new HashSet<>());
+            this.bloomFilterMap = requireNonNull(bloomFilterMap);
+        }
+
+        public Optional<BloomFilter> readBloomFilter(ColumnPath columnPath)
+        {
+            return Optional.ofNullable(bloomFilterMap.getOrDefault(columnPath, null));
+        }
+    }
+
+    private static class MockParquetDataSource
+            extends AbstractParquetDataSource
+    {
+        public MockParquetDataSource()
+        {
+            super(ID, 0, new ParquetReaderOptions());
+        }
+
+        @Override
+        protected void readInternal(long position, byte[] buffer, int bufferOffset, int bufferLength)
+                throws IOException
+        {}
+    }
+
+    private static long getBloomFilterHash(BloomFilter bloomFilter, Slice predicateValue, Type sqlType)
+            throws UnsupportedOperationException
+    {
+        if (sqlType instanceof VarcharType) {
+            return bloomFilter.hash(Binary.fromConstantByteBuffer(predicateValue.toByteBuffer()));
+        }
+        else {
+            throw new UnsupportedOperationException("Unsupported type " + sqlType);
+        }
     }
 }
