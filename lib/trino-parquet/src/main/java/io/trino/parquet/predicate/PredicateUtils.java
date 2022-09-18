@@ -20,6 +20,7 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 import io.airlift.slice.Slice;
 import io.airlift.slice.SliceInput;
+import io.trino.parquet.BloomFilterStore;
 import io.trino.parquet.DictionaryPage;
 import io.trino.parquet.ParquetDataSource;
 import io.trino.parquet.ParquetEncoding;
@@ -51,6 +52,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import static io.trino.parquet.BloomFilterStore.bloomFilterEnabled;
 import static io.trino.parquet.ParquetCompressionUtils.decompress;
 import static io.trino.parquet.ParquetTypeUtils.getParquetEncoding;
 import static io.trino.spi.type.BigintType.BIGINT;
@@ -73,6 +75,8 @@ public final class PredicateUtils
     // and when the dictionary does not eliminate a row-group, the work done to
     // decode the dictionary and match it with predicates is wasted.
     private static final int MAX_DICTIONARY_SIZE = 8096;
+
+    private static final int DEFAULT_DOMAIN_COMPACTION_THRESHOLD = 32;
 
     private PredicateUtils() {}
 
@@ -119,6 +123,16 @@ public final class PredicateUtils
             Map<List<String>, ColumnDescriptor> descriptorsByPath,
             DateTimeZone timeZone)
     {
+        return buildPredicate(requestedSchema, parquetTupleDomain, descriptorsByPath, timeZone, DEFAULT_DOMAIN_COMPACTION_THRESHOLD);
+    }
+
+    public static Predicate buildPredicate(
+            MessageType requestedSchema,
+            TupleDomain<ColumnDescriptor> parquetTupleDomain,
+            Map<List<String>, ColumnDescriptor> descriptorsByPath,
+            DateTimeZone timeZone,
+            int domainCompactionThreshold)
+    {
         ImmutableList.Builder<ColumnDescriptor> columnReferences = ImmutableList.builder();
         for (String[] paths : requestedSchema.getPaths()) {
             ColumnDescriptor descriptor = descriptorsByPath.get(Arrays.asList(paths));
@@ -126,7 +140,7 @@ public final class PredicateUtils
                 columnReferences.add(descriptor);
             }
         }
-        return new TupleDomainParquetPredicate(parquetTupleDomain, columnReferences.build(), timeZone);
+        return new TupleDomainParquetPredicate(parquetTupleDomain, columnReferences.build(), timeZone, domainCompactionThreshold);
     }
 
     public static boolean predicateMatches(
@@ -136,7 +150,24 @@ public final class PredicateUtils
             Map<List<String>, ColumnDescriptor> descriptorsByPath,
             TupleDomain<ColumnDescriptor> parquetTupleDomain,
             Optional<ColumnIndexStore> columnIndexStore,
+            Optional<BloomFilterStore> bloomFilterStore,
             DateTimeZone timeZone)
+            throws IOException
+    {
+        return predicateMatches(parquetPredicate, block, dataSource, descriptorsByPath,
+                parquetTupleDomain, columnIndexStore, bloomFilterStore, timeZone, DEFAULT_DOMAIN_COMPACTION_THRESHOLD);
+    }
+
+    public static boolean predicateMatches(
+            Predicate parquetPredicate,
+            BlockMetaData block,
+            ParquetDataSource dataSource,
+            Map<List<String>, ColumnDescriptor> descriptorsByPath,
+            TupleDomain<ColumnDescriptor> parquetTupleDomain,
+            Optional<ColumnIndexStore> columnIndexStore,
+            Optional<BloomFilterStore> bloomFilterStore,
+            DateTimeZone timeZone,
+            int domainCompactionThreshold)
             throws IOException
     {
         Map<ColumnDescriptor, Statistics<?>> columnStatistics = getStatistics(block, descriptorsByPath);
@@ -147,13 +178,22 @@ public final class PredicateUtils
         if (candidateColumns.get().isEmpty()) {
             return true;
         }
-        // Perform column index and dictionary lookups only for the subset of columns where it can be useful.
+        // Perform column index, bloom filter checks and dictionary lookups only for the subset of columns where it can be useful.
         // This prevents unnecessary filesystem reads and decoding work when the predicate on a column comes from
         // file-level min/max stats or more generally when the predicate selects a range equal to or wider than row-group min/max.
-        Predicate indexPredicate = new TupleDomainParquetPredicate(parquetTupleDomain, candidateColumns.get(), timeZone);
+        Predicate indexPredicate = new TupleDomainParquetPredicate(parquetTupleDomain, candidateColumns.get(), timeZone, domainCompactionThreshold);
 
         // Page stats is finer grained but relatively more expensive, so we do the filtering after above block filtering.
         if (columnIndexStore.isPresent() && !indexPredicate.matches(block.getRowCount(), columnIndexStore.get(), dataSource.getId())) {
+            return false;
+        }
+
+        if (bloomFilterStore.isPresent() && !bloomFilterPredicatesMatch(
+                indexPredicate,
+                ImmutableSet.copyOf(candidateColumns.get()),
+                block,
+                bloomFilterStore.get(),
+                descriptorsByPath)) {
             return false;
         }
 
@@ -179,6 +219,26 @@ public final class PredicateUtils
             }
         }
         return statistics.buildOrThrow();
+    }
+
+    private static boolean bloomFilterPredicatesMatch(
+            Predicate parquetPredicate,
+            Set<ColumnDescriptor> candidateColumns,
+            BlockMetaData blockMetadata,
+            BloomFilterStore bloomFilterStore,
+            Map<List<String>, ColumnDescriptor> descriptorsByPath)
+    {
+        for (ColumnChunkMetaData columnMetaData : blockMetadata.getColumns()) {
+            ColumnDescriptor descriptor = descriptorsByPath.get(Arrays.asList(columnMetaData.getPath().toArray()));
+            if (descriptor == null || !candidateColumns.contains(descriptor)) {
+                continue;
+            }
+
+            if (bloomFilterEnabled(columnMetaData) && !parquetPredicate.matches(descriptor, columnMetaData.getPath(), bloomFilterStore)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static boolean dictionaryPredicatesMatch(

@@ -98,6 +98,19 @@ public class ParquetReaderConfig
         return options.isUseColumnIndex();
     }
 
+    @Config("parquet.use-bloom-filter")
+    @ConfigDescription("Enable using Parquet bloom filter")
+    public ParquetReaderConfig setUseBloomFilter(boolean useBloomFilter)
+    {
+        options = options.withUseBloomFilterIndex(useBloomFilter);
+        return this;
+    }
+
+    public boolean isUseBloomFilter()
+    {
+        return options.isUseBloomFilterIndex();
+    }
+
     public ParquetReaderOptions toParquetReaderOptions()
     {
         return options;

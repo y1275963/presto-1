@@ -53,6 +53,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class TestCheckpointEntryIterator
 {
     private static final String TEST_CHECKPOINT = "databricks/person/_delta_log/00000000000000000010.checkpoint.parquet";
+    private static final int DOMAIN_COMPACTION_THRESHOLD = 32;
 
     private CheckpointSchemaManager checkpointSchemaManager;
 
@@ -227,6 +228,7 @@ public class TestCheckpointEntryIterator
                 metadataEntry,
                 new FileFormatDataSourceStats(),
                 new ParquetReaderConfig().toParquetReaderOptions(),
-                true);
+                true,
+                DOMAIN_COMPACTION_THRESHOLD);
     }
 }

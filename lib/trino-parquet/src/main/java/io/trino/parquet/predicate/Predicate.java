@@ -13,11 +13,13 @@
  */
 package io.trino.parquet.predicate;
 
+import io.trino.parquet.BloomFilterStore;
 import io.trino.parquet.ParquetCorruptionException;
 import io.trino.parquet.ParquetDataSourceId;
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.statistics.Statistics;
 import org.apache.parquet.filter2.predicate.FilterPredicate;
+import org.apache.parquet.hadoop.metadata.ColumnPath;
 import org.apache.parquet.internal.filter2.columnindex.ColumnIndexStore;
 import org.joda.time.DateTimeZone;
 
@@ -30,17 +32,16 @@ public interface Predicate
     /**
      * Should the Parquet Reader process a file section with the specified statistics,
      * and if it should, then return the columns are candidates for further inspection of more
-     * granular statistics from column index and dictionary.
+     * granular statistics from column index, bloom filter and dictionary
      *
      * @param numberOfRows the number of rows in the segment; this can be used with
      * Statistics to determine if a column is only null
      * @param statistics column statistics
      * @param id Parquet file name
-     *
      * @return Optional.empty() if statistics were sufficient to eliminate the file section.
      * Otherwise, a list of columns for which page-level indices and dictionary could be consulted
      * to potentially eliminate the file section. An optional with empty list is returned if there is
-     * going to be no benefit in looking at column index or dictionary for any column.
+     * going to be no benefit in looking at column index, bloom filter or dictionary for any column.
      */
     Optional<List<ColumnDescriptor>> getIndexLookupCandidates(long numberOfRows, Map<ColumnDescriptor, Statistics<?>> statistics, ParquetDataSourceId id)
             throws ParquetCorruptionException;
@@ -53,6 +54,15 @@ public interface Predicate
      * @param dictionary The single column dictionary
      */
     boolean matches(DictionaryDescriptor dictionary);
+
+    /**
+     * Should the Parquet Reader process a file section with bloom filter statistics.
+     *
+     * @param columnDescriptor column descriptor specification for the single column
+     * @param columnPath column path specification for the single column
+     * @param bloomFilterStore bloom filter store
+     */
+    boolean matches(ColumnDescriptor columnDescriptor, ColumnPath columnPath, BloomFilterStore bloomFilterStore);
 
     /**
      * Should the Parquet Reader process a file section with the specified statistics.

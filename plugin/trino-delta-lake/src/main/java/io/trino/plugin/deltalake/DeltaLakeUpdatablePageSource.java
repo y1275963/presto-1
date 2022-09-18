@@ -106,6 +106,7 @@ public class DeltaLakeUpdatablePageSource
     private final HdfsContext hdfsContext;
     private final DateTimeZone parquetDateTimeZone;
     private final ParquetReaderOptions parquetReaderOptions;
+    private final int domainCompactionThreshold;
     private final TypeManager typeManager;
     private final JsonCodec<DeltaLakeUpdateResult> updateResultJsonCodec;
     private final BitSet rowsToDelete;
@@ -139,7 +140,8 @@ public class DeltaLakeUpdatablePageSource
             ParquetReaderOptions parquetReaderOptions,
             TupleDomain<HiveColumnHandle> parquetPredicate,
             TypeManager typeManager,
-            JsonCodec<DeltaLakeUpdateResult> updateResultJsonCodec)
+            JsonCodec<DeltaLakeUpdateResult> updateResultJsonCodec,
+            int domainCompactionThreshold)
     {
         this.tableHandle = requireNonNull(tableHandle, "tableHandle is null");
         this.queryColumns = requireNonNull(queryColumns, "queryColumns is null");
@@ -155,6 +157,7 @@ public class DeltaLakeUpdatablePageSource
         this.parquetReaderOptions = requireNonNull(parquetReaderOptions, "parquetReaderOptions is null");
         this.typeManager = requireNonNull(typeManager, "typeManager is null");
         this.updateResultJsonCodec = requireNonNull(updateResultJsonCodec, "deleteResultJsonCodec is null");
+        this.domainCompactionThreshold = domainCompactionThreshold;
 
         List<DeltaLakeColumnMetadata> columnMetadata = extractSchema(tableHandle.getMetadataEntry(), typeManager);
         List<DeltaLakeColumnHandle> allColumns = columnMetadata.stream()
@@ -580,7 +583,8 @@ public class DeltaLakeUpdatablePageSource
                 new FileFormatDataSourceStats(),
                 parquetReaderOptions.withMaxReadBlockSize(getParquetMaxReadBlockSize(this.session))
                         .withUseColumnIndex(isParquetUseColumnIndex(this.session)),
-                Optional.empty());
+                Optional.empty(),
+                domainCompactionThreshold);
     }
 
     private DeltaLakeWriter createWriter(Path targetFile, List<DeltaLakeColumnMetadata> allColumns, List<DeltaLakeColumnHandle> dataColumns)

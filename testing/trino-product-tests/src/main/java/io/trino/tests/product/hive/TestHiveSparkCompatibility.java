@@ -188,6 +188,73 @@ public class TestHiveSparkCompatibility
         onSpark().executeQuery("DROP TABLE " + sparkTableName);
     }
 
+    @Test(groups = {HIVE_SPARK, PROFILE_SPECIFIC_TESTS})
+    public void testSparkParquetBloomFilterCompatibility()
+    {
+        String sparkTableNameWithBloomFilter = "test_spark_parquet_bloom_filter_compatibility_enabled_" + randomTableSuffix();
+        String sparkTableNameNoBloomFilter = "test_spark_parquet_bloom_filter_compatibility_disabled_" + randomTableSuffix();
+
+        // disable dictionary predicate when testing bloom filter predicate
+        onSpark().executeQuery(
+                "CREATE TABLE " + sparkTableNameWithBloomFilter + "(id INT, name STRING, age INT) USING PARQUET " +
+                        "OPTIONS (" +
+                        "'parquet.bloom.filter.enabled'='true'," +
+                        "'parquet.enable.dictionary'='false'" +
+                        ")");
+        onSpark().executeQuery(
+                "CREATE TABLE " + sparkTableNameNoBloomFilter + "(id INT, name STRING, age INT) USING PARQUET " +
+                        "OPTIONS (" +
+                        "'parquet.bloom.filter.enabled'='false'," +
+                        "'parquet.enable.dictionary'='false'" +
+                        ")");
+        String[] sparkTables = new String[] {sparkTableNameWithBloomFilter, sparkTableNameNoBloomFilter};
+        String[] trinoTables = new String[] {
+                format("%s.default.%s", TRINO_CATALOG, sparkTableNameWithBloomFilter),
+                format("%s.default.%s", TRINO_CATALOG, sparkTableNameNoBloomFilter)};
+
+        // control number of spark output files via hint: https://issues.apache.org/jira/browse/SPARK-24940
+        // contain values such as aaaaaaaaaaa and zzzzzzzzzzz, this made sure file level statistics: min and max won't take effect
+        for (String sparkTable : sparkTables) {
+            onSpark().executeQuery(format(
+                    "INSERT INTO %s " +
+                            "select /*+ REPARTITION(1) */  id, name, age from VALUES " +
+                            "(1, 'aaaaaaaaaaa', 1)" +
+                            ", (3, 'fdsvxxbv33cb', -2)" +
+                            ", (54, 'hhghhr3bvcbvc', 3)" +
+                            ", (34, 'ddbvecxdvcbvcd', -2)" +
+                            ", (5324, 'refgfdfrexx', 3)" +
+                            ", (33323, 'r3ewfewfr2fvcx', -2)" +
+                            ", (544, 'vcxwrcvewfgr44', 3)" +
+                            ", (3344, 'fcdgfdshrfh', -2)" +
+                            ", (577, 'nbcvewfvthtr', 3)" +
+                            ", (3555, 'h3ee2gfhhgf', -2)" +
+                            ", (5443, 'y432hbsshj', 3)" +
+                            ", (223342, 'zzzzzzzzzzz', 30)" +
+                            ", (9444, 'ff34322vxff', -4) AS data(id, name, age)",
+                    sparkTable));
+        }
+
+        // explicitly make sure using bloom filter statistics
+        onTrino().executeQuery("set session hive.parquet_use_bloom_filter=true");
+        for (String trinoTable : trinoTables) {
+            assertThat(onTrino().executeQuery("SELECT count(*) FROM " + trinoTable + " WHERE name in ('fdsvxxbv33cb', 'cxxx322', 'cxxx323')"))
+                    .containsOnly(List.of(
+                            row(1)));
+        }
+
+        // explicitly make sure not using bloom filter statistics
+        onTrino().executeQuery("set session hive.parquet_use_bloom_filter=false");
+        for (String trinoTable : trinoTables) {
+            assertThat(onTrino().executeQuery("SELECT count(*) FROM " + trinoTable + " WHERE name in ('fdsvxxbv33cb', 'cxxx322', 'cxxx323')"))
+                    .containsOnly(List.of(
+                            row(1)));
+        }
+
+        for (String sparkTable : sparkTables) {
+            onSpark().executeQuery("DROP TABLE " + sparkTable);
+        }
+    }
+
     @Test(groups = {HIVE_SPARK, PROFILE_SPECIFIC_TESTS}, dataProvider = "sparkParquetTimestampFormats")
     public void testSparkParquetTimestampCompatibility(String sparkTimestampFormat, String sparkTimestamp, String[] expectedValues)
     {

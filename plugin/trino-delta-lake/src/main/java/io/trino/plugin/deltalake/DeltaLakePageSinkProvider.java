@@ -49,6 +49,7 @@ public class DeltaLakePageSinkProvider
     private final DateTimeZone parquetDateTimeZone;
     private final TypeManager typeManager;
     private final String trinoVersion;
+    private final int domainCompactionThreshold;
 
     @Inject
     public DeltaLakePageSinkProvider(
@@ -70,6 +71,7 @@ public class DeltaLakePageSinkProvider
         this.stats = stats;
         this.maxPartitionsPerWriter = deltaLakeConfig.getMaxPartitionsPerWriter();
         this.parquetDateTimeZone = deltaLakeConfig.getParquetDateTimeZone();
+        this.domainCompactionThreshold = deltaLakeConfig.getDomainCompactionThreshold();
         this.typeManager = requireNonNull(typeManager, "typeManager is null");
         this.trinoVersion = nodeVersion.toString();
     }
@@ -152,6 +154,7 @@ public class DeltaLakePageSinkProvider
                 stats,
                 tableHandle.getLocation(),
                 pageSink,
-                tableHandle.getInputColumns());
+                tableHandle.getInputColumns(),
+                domainCompactionThreshold);
     }
 }

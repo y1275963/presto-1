@@ -20,11 +20,12 @@ import io.airlift.slice.BasicSliceInput;
 import io.airlift.slice.Slice;
 import io.airlift.slice.Slices;
 import io.airlift.units.DataSize;
+import io.trino.parquet.AbstractParquetDataSource;
 import io.trino.parquet.ChunkReader;
 import io.trino.parquet.DiskRange;
 import io.trino.parquet.ParquetDataSourceId;
 import io.trino.parquet.ParquetReaderOptions;
-import io.trino.plugin.hive.FileFormatDataSourceStats;
+import io.trino.spi.TrinoException;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.PositionedReadable;
 import org.apache.hadoop.fs.Seekable;
@@ -35,10 +36,12 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.stream.IntStream;
 
+import static io.trino.plugin.hive.HiveErrorCode.HIVE_FILESYSTEM_ERROR;
+import static java.lang.String.format;
 import static java.util.Objects.requireNonNull;
 import static org.assertj.core.api.Assertions.assertThat;
 
-public class TestHdfsParquetDataSource
+public class TestTrinoParquetDataSource
 {
     @Test(dataProvider = "testPlanReadOrderingProvider")
     public void testPlanReadOrdering(DataSize maxBufferSize)
@@ -48,7 +51,6 @@ public class TestHdfsParquetDataSource
                 new ParquetDataSourceId("test"),
                 0,
                 new FSDataInputStream(new TestingSliceInputStream(testingInput.getInput())),
-                new FileFormatDataSourceStats(),
                 new ParquetReaderOptions().withMaxBufferSize(maxBufferSize));
 
         ListMultimap<String, ChunkReader> chunkReaders = dataSource.planRead(ImmutableListMultimap.<String, DiskRange>builder()
@@ -70,6 +72,40 @@ public class TestHdfsParquetDataSource
                 {DataSize.ofBytes(200)}, // Mix of large and small ranges
                 {DataSize.ofBytes(100000000)}, // All small ranges
         };
+    }
+
+    private static class HdfsParquetDataSource
+            extends AbstractParquetDataSource
+    {
+        private final FSDataInputStream inputStream;
+
+        public HdfsParquetDataSource(
+                ParquetDataSourceId id,
+                long estimatedSize,
+                FSDataInputStream inputStream,
+                ParquetReaderOptions options)
+        {
+            super(id, estimatedSize, options);
+            this.inputStream = inputStream;
+        }
+
+        @Override
+        protected void readInternal(long position, byte[] buffer, int bufferOffset, int bufferLength)
+        {
+            try {
+                inputStream.readFully(position, buffer, bufferOffset, bufferLength);
+            }
+            catch (IOException e) {
+                throw new TrinoException(HIVE_FILESYSTEM_ERROR, format("Error reading from %s at position %s", getId(), position), e);
+            }
+        }
+
+        @Override
+        public void close()
+                throws IOException
+        {
+            inputStream.close();
+        }
     }
 
     private static class TestingSliceInputStream
