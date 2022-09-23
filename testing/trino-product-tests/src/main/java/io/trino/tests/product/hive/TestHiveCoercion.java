@@ -407,7 +407,7 @@ public class TestHiveCoercion
         if (isFormat.test("rctext") || isFormat.test("textfile")) {
             hiveValueForCaseChangeField = "\"lower2uppercase\":2";
         }
-        else if (isFormat.test("orc")) {
+        else if (getHiveVersionMajor() == 3 && isFormat.test("orc")) {
             hiveValueForCaseChangeField = "\"LOWER2UPPERCASE\":null";
         }
         else {
