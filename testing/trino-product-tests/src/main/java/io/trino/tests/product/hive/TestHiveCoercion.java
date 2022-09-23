@@ -42,6 +42,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.Predicate;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.collect.ImmutableList.toImmutableList;
@@ -72,6 +73,7 @@ import static java.sql.JDBCType.VARCHAR;
 import static java.util.Locale.ENGLISH;
 import static java.util.Objects.requireNonNull;
 import static java.util.stream.Collectors.toList;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.testng.Assert.assertEquals;
 
 public class TestHiveCoercion
@@ -385,7 +387,16 @@ public class TestHiveCoercion
     protected Map<String, List<Object>> expectedValuesForEngineProvider(Engine engine, String tableName, String decimalToFloatVal)
     {
         String hiveValueForCaseChangeField;
-        hiveValueForCaseChangeField = "\"LOWER2UPPERCASE\":2";
+        Predicate<String> isFormat = formatName -> tableName.toLowerCase(ENGLISH).contains(formatName);
+        if (isFormat.test("rctext") || isFormat.test("textfile")) {
+            hiveValueForCaseChangeField = "\"lower2uppercase\":2";
+        }
+        else if (isFormat.test("orc")) {
+            hiveValueForCaseChangeField = "\"LOWER2UPPERCASE\":null";
+        }
+        else {
+            hiveValueForCaseChangeField = "\"LOWER2UPPERCASE\":2";
+        }
 
         return ImmutableMap.<String, List<Object>>builder()
                 .put("row_to_row", Arrays.asList(
@@ -517,18 +528,29 @@ public class TestHiveCoercion
 
     private void assertNestedSubFields(String tableName)
     {
+        Predicate<String> isFormat = formatName -> tableName.toLowerCase(ENGLISH).contains(formatName);
+
         String subfieldQueryLowerCase = format("SELECT row_to_row.lower2uppercase nested_field FROM %s", tableName);
         String subfieldQueryUpperCase = format("SELECT row_to_row.LOWER2UPPERCASE nested_field FROM %s", tableName);
-        Map<String, List<Object>> expectedNestedFieldTrino = ImmutableMap.of("nested_field", ImmutableList.of(2L, 2L));
+        Map<String, List<Object>> expectedNestedField = ImmutableMap.of("nested_field", ImmutableList.of(2L, 2L));
         List<String> expectedColumns = ImmutableList.of("nested_field");
 
         // Assert Trino behavior
-        assertQueryResults(Engine.TRINO, subfieldQueryUpperCase, expectedNestedFieldTrino, expectedColumns, 2, tableName);
-        assertQueryResults(Engine.TRINO, subfieldQueryLowerCase, expectedNestedFieldTrino, expectedColumns, 2, tableName);
+        assertQueryResults(Engine.TRINO, subfieldQueryUpperCase, expectedNestedField, expectedColumns, 2, tableName);
+        assertQueryResults(Engine.TRINO, subfieldQueryLowerCase, expectedNestedField, expectedColumns, 2, tableName);
 
         // Assert Hive behavior
-        assertQueryResults(Engine.HIVE, subfieldQueryUpperCase, expectedNestedFieldTrino, expectedColumns, 2, tableName);
-        assertQueryResults(Engine.HIVE, subfieldQueryLowerCase, expectedNestedFieldTrino, expectedColumns, 2, tableName);
+        if (isFormat.test("rcbinary")) {
+            assertThatThrownBy(() -> assertQueryResults(Engine.HIVE, subfieldQueryUpperCase, expectedNestedField, expectedColumns, 2, tableName))
+                    .hasMessageContaining("org.apache.hadoop.hive.ql.metadata.HiveException");
+            assertThatThrownBy(() -> assertQueryResults(Engine.HIVE, subfieldQueryLowerCase, expectedNestedField, expectedColumns, 2, tableName))
+                    .hasMessageContaining("org.apache.hadoop.hive.ql.metadata.HiveException");
+            return;
+        }
+        else {
+            assertQueryResults(Engine.HIVE, subfieldQueryUpperCase, expectedNestedField, expectedColumns, 2, tableName);
+            assertQueryResults(Engine.HIVE, subfieldQueryLowerCase, expectedNestedField, expectedColumns, 2, tableName);
+        }
     }
 
     protected Map<ColumnContext, String> expectedExceptionsWithContext()
