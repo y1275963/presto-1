@@ -560,7 +560,7 @@ public class TestHiveCoercion
 
         Map<String, List<Object>> expectedNestedFieldTrino = ImmutableMap.of("nested_field", ImmutableList.of(2L, 2L));
         Map<String, List<Object>> expectedNestedFieldHive;
-        if (isFormat.test("orc")) {
+        if (getHiveVersionMajor() == 3 && isFormat.test("orc")) {
             expectedNestedFieldHive = ImmutableMap.of("nested_field", Arrays.asList(null, null));
         }
         else {
@@ -578,18 +578,21 @@ public class TestHiveCoercion
         if (isFormat.test("rcbinary")) {
             assertThatThrownBy(() -> assertQueryResults(Engine.HIVE, subfieldQueryUpperCase, expectedNestedFieldTrino, expectedColumns, 2, tableName))
                     .hasMessageContaining("org.apache.hadoop.hive.ql.metadata.HiveException");
-            assertThatThrownBy(() -> assertQueryResults(Engine.HIVE, subfieldQueryLowerCase, expectedNestedFieldTrino, expectedColumns, 2, tableName))
-                    .hasMessageContaining("org.apache.hadoop.hive.ql.metadata.HiveException");
-            return;
         }
-        else {
-            try {
-                assertQueryResults(Engine.HIVE, subfieldQueryUpperCase, expectedNestedFieldHive, expectedColumns, 2, tableName);
+        else if (isFormat.test("parquet")) {
+            assertQueryResults(Engine.HIVE, subfieldQueryUpperCase, expectedNestedFieldHive, expectedColumns, 2, tableName);
+
+            if (getHiveVersionMajor() == 1) {
+                assertThatThrownBy(() -> assertQueryResults(Engine.HIVE, subfieldQueryLowerCase, expectedNestedFieldHive, expectedColumns, 2, tableName))
+                        .hasMessageContaining("java.sql.SQLException");
+            }
+            else {
                 assertQueryResults(Engine.HIVE, subfieldQueryLowerCase, expectedNestedFieldHive, expectedColumns, 2, tableName);
             }
-            catch (Exception ex) {
-                System.err.println(ex);
-            }
+        }
+        else {
+            assertQueryResults(Engine.HIVE, subfieldQueryUpperCase, expectedNestedFieldHive, expectedColumns, 2, tableName);
+            assertQueryResults(Engine.HIVE, subfieldQueryLowerCase, expectedNestedFieldHive, expectedColumns, 2, tableName);
         }
     }
 
