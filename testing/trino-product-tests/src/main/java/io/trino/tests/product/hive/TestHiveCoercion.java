@@ -530,9 +530,15 @@ public class TestHiveCoercion
     {
         Predicate<String> isFormat = formatName -> tableName.toLowerCase(ENGLISH).contains(formatName);
 
+        Map<String, List<Object>> expectedNestedField;
+        if (isFormat.test("orc")) {
+            expectedNestedField = ImmutableMap.of("nested_field", Arrays.asList(null, null));
+        }
+        else {
+            expectedNestedField = ImmutableMap.of("nested_field", ImmutableList.of(2L, 2L));
+        }
         String subfieldQueryLowerCase = format("SELECT row_to_row.lower2uppercase nested_field FROM %s", tableName);
         String subfieldQueryUpperCase = format("SELECT row_to_row.LOWER2UPPERCASE nested_field FROM %s", tableName);
-        Map<String, List<Object>> expectedNestedField = ImmutableMap.of("nested_field", ImmutableList.of(2L, 2L));
         List<String> expectedColumns = ImmutableList.of("nested_field");
 
         // Assert Trino behavior
