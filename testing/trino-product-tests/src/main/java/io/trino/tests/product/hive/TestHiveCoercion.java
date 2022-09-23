@@ -530,32 +530,33 @@ public class TestHiveCoercion
     {
         Predicate<String> isFormat = formatName -> tableName.toLowerCase(ENGLISH).contains(formatName);
 
-        Map<String, List<Object>> expectedNestedField;
+        Map<String, List<Object>> expectedNestedFieldTrino = ImmutableMap.of("nested_field", ImmutableList.of(2L, 2L));
+        Map<String, List<Object>> expectedNestedFieldHive;
         if (isFormat.test("orc")) {
-            expectedNestedField = ImmutableMap.of("nested_field", Arrays.asList(null, null));
+            expectedNestedFieldHive = ImmutableMap.of("nested_field", Arrays.asList(null, null));
         }
         else {
-            expectedNestedField = ImmutableMap.of("nested_field", ImmutableList.of(2L, 2L));
+            expectedNestedFieldHive = expectedNestedFieldTrino;
         }
         String subfieldQueryLowerCase = format("SELECT row_to_row.lower2uppercase nested_field FROM %s", tableName);
         String subfieldQueryUpperCase = format("SELECT row_to_row.LOWER2UPPERCASE nested_field FROM %s", tableName);
         List<String> expectedColumns = ImmutableList.of("nested_field");
 
         // Assert Trino behavior
-        assertQueryResults(Engine.TRINO, subfieldQueryUpperCase, expectedNestedField, expectedColumns, 2, tableName);
-        assertQueryResults(Engine.TRINO, subfieldQueryLowerCase, expectedNestedField, expectedColumns, 2, tableName);
+        assertQueryResults(Engine.TRINO, subfieldQueryUpperCase, expectedNestedFieldTrino, expectedColumns, 2, tableName);
+        assertQueryResults(Engine.TRINO, subfieldQueryLowerCase, expectedNestedFieldTrino, expectedColumns, 2, tableName);
 
         // Assert Hive behavior
         if (isFormat.test("rcbinary")) {
-            assertThatThrownBy(() -> assertQueryResults(Engine.HIVE, subfieldQueryUpperCase, expectedNestedField, expectedColumns, 2, tableName))
+            assertThatThrownBy(() -> assertQueryResults(Engine.HIVE, subfieldQueryUpperCase, expectedNestedFieldTrino, expectedColumns, 2, tableName))
                     .hasMessageContaining("org.apache.hadoop.hive.ql.metadata.HiveException");
-            assertThatThrownBy(() -> assertQueryResults(Engine.HIVE, subfieldQueryLowerCase, expectedNestedField, expectedColumns, 2, tableName))
+            assertThatThrownBy(() -> assertQueryResults(Engine.HIVE, subfieldQueryLowerCase, expectedNestedFieldTrino, expectedColumns, 2, tableName))
                     .hasMessageContaining("org.apache.hadoop.hive.ql.metadata.HiveException");
             return;
         }
         else {
-            assertQueryResults(Engine.HIVE, subfieldQueryUpperCase, expectedNestedField, expectedColumns, 2, tableName);
-            assertQueryResults(Engine.HIVE, subfieldQueryLowerCase, expectedNestedField, expectedColumns, 2, tableName);
+            assertQueryResults(Engine.HIVE, subfieldQueryUpperCase, expectedNestedFieldHive, expectedColumns, 2, tableName);
+            assertQueryResults(Engine.HIVE, subfieldQueryLowerCase, expectedNestedFieldHive, expectedColumns, 2, tableName);
         }
     }
 
