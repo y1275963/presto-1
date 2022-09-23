@@ -560,7 +560,7 @@ public class TestHiveCoercion
 
         Map<String, List<Object>> expectedNestedFieldTrino = ImmutableMap.of("nested_field", ImmutableList.of(2L, 2L));
         Map<String, List<Object>> expectedNestedFieldHive;
-        if (getHiveVersionMajor() == 3 && isFormat.test("orc")) {
+        if (getHiveVersionMajor() == 1 && isFormat.test("orc")) {
             expectedNestedFieldHive = ImmutableMap.of("nested_field", Arrays.asList(null, null));
         }
         else {
