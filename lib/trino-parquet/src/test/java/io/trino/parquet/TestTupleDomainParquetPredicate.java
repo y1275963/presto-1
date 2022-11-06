@@ -903,6 +903,7 @@ public class TestTupleDomainParquetPredicate
             this.bloomFilterMap = requireNonNull(bloomFilterMap);
         }
 
+        @Override
         public Optional<BloomFilter> readBloomFilter(ColumnPath columnPath)
         {
             return Optional.ofNullable(bloomFilterMap.getOrDefault(columnPath, null));

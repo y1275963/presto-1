@@ -194,14 +194,14 @@ public class TupleDomainParquetPredicate
         if (effectivePredicateDomain.isNullAllowed()) {
             return true;
         }
-        Optional<BloomFilter> bloomFilterOptional = bloomFilterStore.readBloomFilter(columnPath);
-        if (!bloomFilterOptional.isPresent()) {
-            return true;
-        }
 
         Optional<Collection<Object>> discreteValues = extractDiscreteValues(effectivePredicateDomain.getValues());
         if (discreteValues.isEmpty()) {
             // values are not discrete, so bloom filter isn't helpful
+            return true;
+        }
+        Optional<BloomFilter> bloomFilterOptional = bloomFilterStore.readBloomFilter(columnPath);
+        if (!bloomFilterOptional.isPresent()) {
             return true;
         }
         BloomFilter bloomFilter = bloomFilterOptional.get();
