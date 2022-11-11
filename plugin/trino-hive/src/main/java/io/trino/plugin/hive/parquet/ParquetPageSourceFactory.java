@@ -238,7 +238,7 @@ public class ParquetPageSourceFactory
             for (BlockMetaData block : parquetMetadata.getBlocks()) {
                 long firstDataPage = block.getColumns().get(0).getFirstDataPageOffset();
                 Optional<ColumnIndexStore> columnIndex = getColumnIndexStore(dataSource, block, descriptorsByPath, parquetTupleDomain, options);
-                Optional<BloomFilterStore> bloomFilterStore = getBloomFilterStore(dataSource, block, parquetTupleDomain, options);
+                Optional<BloomFilterStore> bloomFilterStore = getBloomFilterStore(dataSource, parquetMetadata, block, parquetTupleDomain, options);
 
                 if (start <= firstDataPage && firstDataPage < start + length
                         && predicateMatches(
@@ -405,6 +405,7 @@ public class ParquetPageSourceFactory
 
     public static Optional<BloomFilterStore> getBloomFilterStore(
             ParquetDataSource dataSource,
+            ParquetMetadata parquetMetadata,
             BlockMetaData blockMetadata,
             TupleDomain<ColumnDescriptor> parquetTupleDomain,
             ParquetReaderOptions options)
@@ -431,7 +432,7 @@ public class ParquetPageSourceFactory
                 .map(column -> ColumnPath.get(column.getPath()))
                 .collect(toImmutableSet());
 
-        return Optional.of(new BloomFilterStore(dataSource, blockMetadata, columnsFilteredPaths));
+        return Optional.of(new BloomFilterStore(dataSource, parquetMetadata, blockMetadata, columnsFilteredPaths));
     }
 
     public static TupleDomain<ColumnDescriptor> getParquetTupleDomain(

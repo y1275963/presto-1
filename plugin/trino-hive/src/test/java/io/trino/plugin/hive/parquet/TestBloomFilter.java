@@ -67,7 +67,7 @@ public class TestBloomFilter
 
         ColumnChunkMetaData columnChunkMetaData = getOnlyElement(getOnlyElement(parquetMetadata.getBlocks()).getColumns());
 
-        BloomFilterStore bloomFilterStore = new BloomFilterStore(dataSource, getOnlyElement(parquetMetadata.getBlocks()), Set.of(columnChunkMetaData.getPath()));
+        BloomFilterStore bloomFilterStore = new BloomFilterStore(dataSource, parquetMetadata, getOnlyElement(parquetMetadata.getBlocks()), Set.of(columnChunkMetaData.getPath()));
         Optional<BloomFilter> bloomFilterOptional = bloomFilterStore.readBloomFilter(columnChunkMetaData.getPath());
         assertTrue(bloomFilterOptional.isPresent());
         BloomFilter bloomfilter = bloomFilterOptional.get();
@@ -96,7 +96,7 @@ public class TestBloomFilter
         ParquetMetadata parquetMetadata = MetadataReader.readFooter(dataSource, Optional.empty());
 
         ColumnChunkMetaData columnChunkMetaData = getOnlyElement(getOnlyElement(parquetMetadata.getBlocks()).getColumns());
-        BloomFilterStore bloomFilterStore = new BloomFilterStore(dataSource, getOnlyElement(parquetMetadata.getBlocks()), Set.of(columnChunkMetaData.getPath()));
+        BloomFilterStore bloomFilterStore = new BloomFilterStore(dataSource, parquetMetadata, getOnlyElement(parquetMetadata.getBlocks()), Set.of(columnChunkMetaData.getPath()));
         Optional<BloomFilter> bloomFilterOptional = bloomFilterStore.readBloomFilter(columnChunkMetaData.getPath());
         assertFalse(bloomFilterOptional.isPresent());
     }

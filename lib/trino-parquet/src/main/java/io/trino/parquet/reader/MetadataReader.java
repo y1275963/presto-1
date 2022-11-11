@@ -79,6 +79,10 @@ public final class MetadataReader
 
     private MetadataReader() {}
 
+    public static int getExpectedFooterSize() {
+        return EXPECTED_FOOTER_SIZE;
+    }
+
     public static ParquetMetadata readFooter(ParquetDataSource dataSource, Optional<ParquetWriteValidation> parquetWriteValidation)
             throws IOException
     {
