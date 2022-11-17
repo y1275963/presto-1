@@ -188,12 +188,7 @@ public final class PredicateUtils
             return false;
         }
 
-        if (bloomFilterStore.isPresent() && !bloomFilterPredicatesMatch(
-                indexPredicate,
-                ImmutableSet.copyOf(candidateColumns.get()),
-                block,
-                bloomFilterStore.get(),
-                descriptorsByPath)) {
+        if (bloomFilterStore.isPresent() && !indexPredicate.matches(bloomFilterStore.get())) {
             return false;
         }
 
@@ -221,25 +216,6 @@ public final class PredicateUtils
         return statistics.buildOrThrow();
     }
 
-    private static boolean bloomFilterPredicatesMatch(
-            Predicate parquetPredicate,
-            Set<ColumnDescriptor> candidateColumns,
-            BlockMetaData blockMetadata,
-            BloomFilterStore bloomFilterStore,
-            Map<List<String>, ColumnDescriptor> descriptorsByPath)
-    {
-        for (ColumnChunkMetaData columnMetaData : blockMetadata.getColumns()) {
-            ColumnDescriptor descriptor = descriptorsByPath.get(Arrays.asList(columnMetaData.getPath().toArray()));
-            if (descriptor == null || !candidateColumns.contains(descriptor)) {
-                continue;
-            }
-
-            if (bloomFilterEnabled(columnMetaData) && !parquetPredicate.matches(descriptor, columnMetaData.getPath(), bloomFilterStore)) {
-                return false;
-            }
-        }
-        return true;
-    }
 
     private static boolean dictionaryPredicatesMatch(
             Predicate parquetPredicate,

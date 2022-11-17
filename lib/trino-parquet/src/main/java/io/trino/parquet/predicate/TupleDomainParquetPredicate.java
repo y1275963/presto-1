@@ -175,7 +175,7 @@ public class TupleDomainParquetPredicate
     }
 
     @Override
-    public boolean matches(ColumnDescriptor columnDescriptor, ColumnPath columnPath, BloomFilterStore bloomFilterStore)
+    public boolean matches(BloomFilterStore bloomFilterStore)
     {
         requireNonNull(bloomFilterStore, "bloomFilterStore is null");
 
@@ -185,28 +185,30 @@ public class TupleDomainParquetPredicate
         Map<ColumnDescriptor, Domain> effectivePredicateDomains = effectivePredicate.getDomains()
                 .orElseThrow(() -> new IllegalStateException("Effective predicate other than none should have domains"));
 
-        if (!effectivePredicateDomains.containsKey(columnDescriptor)) {
-            return true;
-        }
+        for (ColumnDescriptor column : columns) {
+            Domain effectivePredicateDomain = effectivePredicateDomains.get(column);
 
-        Domain effectivePredicateDomain = effectivePredicateDomains.get(columnDescriptor);
-        // the bloom filter bitset contains only non-null values so isn't helpful
-        if (effectivePredicateDomain.isNullAllowed()) {
-            return true;
-        }
-        Optional<BloomFilter> bloomFilterOptional = bloomFilterStore.readBloomFilter(columnPath);
-        if (!bloomFilterOptional.isPresent()) {
-            return true;
-        }
+            // the bloom filter bitset contains only non-null values so isn't helpful
+            if (effectivePredicateDomain == null || effectivePredicateDomain.isNullAllowed()) {
+                continue;
+            }
 
-        Optional<Collection<Object>> discreteValues = extractDiscreteValues(effectivePredicateDomain.getValues());
-        if (discreteValues.isEmpty()) {
+            Optional<Collection<Object>> discreteValues = extractDiscreteValues(effectivePredicateDomain.getValues());
             // values are not discrete, so bloom filter isn't helpful
-            return true;
-        }
-        BloomFilter bloomFilter = bloomFilterOptional.get();
+            if (discreteValues.isEmpty()) {
+                continue;
+            }
 
-        return discreteValues.get().stream().anyMatch(value -> checkInBloomFilter(bloomFilter, value, effectivePredicateDomain.getType()));
+            Optional<BloomFilter> bloomFilterOptional = bloomFilterStore.readBloomFilter(ColumnPath.get(column.getPath()));
+            if (!bloomFilterOptional.isPresent()) {
+                continue;
+            }
+            BloomFilter bloomFilter = bloomFilterOptional.get();
+            if (!discreteValues.get().stream().anyMatch(value -> checkInBloomFilter(bloomFilter, value, effectivePredicateDomain.getType()))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

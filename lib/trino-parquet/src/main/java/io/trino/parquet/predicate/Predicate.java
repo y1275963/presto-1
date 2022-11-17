@@ -58,11 +58,10 @@ public interface Predicate
     /**
      * Should the Parquet Reader process a file section with bloom filter statistics.
      *
-     * @param columnDescriptor column descriptor specification for the single column
-     * @param columnPath column path specification for the single column
      * @param bloomFilterStore bloom filter store
+     * @return return true if the bloomfilter store might match with the predicate, return false if the bloomfilter absolutely doesn't match with the predicate
      */
-    boolean matches(ColumnDescriptor columnDescriptor, ColumnPath columnPath, BloomFilterStore bloomFilterStore);
+    boolean matches(BloomFilterStore bloomFilterStore);
 
     /**
      * Should the Parquet Reader process a file section with the specified statistics.
