@@ -165,80 +165,6 @@ public class TupleDomainParquetPredicate
         return effectivePredicateDomain == null || effectivePredicateMatches(effectivePredicateDomain, dictionary);
     }
 
-    private Optional<Collection<Object>> extractDiscreteValues(ValueSet valueSet)
-    {
-        if (!valueSet.isDiscreteSet()) {
-            return valueSet.tryExpandRanges(domainCompactionThreshold);
-        }
-
-        return Optional.of(valueSet.getDiscreteSet());
-    }
-
-    @Override
-    public boolean matches(BloomFilterStore bloomFilterStore)
-    {
-        requireNonNull(bloomFilterStore, "bloomFilterStore is null");
-
-        if (effectivePredicate.isNone()) {
-            return false;
-        }
-        Map<ColumnDescriptor, Domain> effectivePredicateDomains = effectivePredicate.getDomains()
-                .orElseThrow(() -> new IllegalStateException("Effective predicate other than none should have domains"));
-
-        for (ColumnDescriptor column : columns) {
-            Domain effectivePredicateDomain = effectivePredicateDomains.get(column);
-
-            // the bloom filter bitset contains only non-null values so isn't helpful
-            if (effectivePredicateDomain == null || effectivePredicateDomain.isNullAllowed()) {
-                continue;
-            }
-
-            Optional<Collection<Object>> discreteValues = extractDiscreteValues(effectivePredicateDomain.getValues());
-            // values are not discrete, so bloom filter isn't helpful
-            if (discreteValues.isEmpty()) {
-                continue;
-            }
-
-            Optional<BloomFilter> bloomFilterOptional = bloomFilterStore.readBloomFilter(ColumnPath.get(column.getPath()));
-            if (!bloomFilterOptional.isPresent()) {
-                continue;
-            }
-            BloomFilter bloomFilter = bloomFilterOptional.get();
-            if (!discreteValues.get().stream().anyMatch(value -> checkInBloomFilter(bloomFilter, value, effectivePredicateDomain.getType()))) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    /**
-     * Check if the predicateValue might be in the bloomfilter
-     *
-     * @param bloomFilter parquet bloomfilter.
-     * @param predicateValue effective discrete predicate value.
-     * @param sqlType Type that contains information about the type schema from connector's metadata
-     * @return true if the predicateValue might be in the bloomfilter, false if the predicateValue absolutely is not in the bloomfilter
-     */
-    private static boolean checkInBloomFilter(BloomFilter bloomFilter, Object predicateValue, Type sqlType)
-    {
-        // todo: support TIMESTAMP, and DECIMAL
-        if (sqlType == TINYINT || sqlType == SMALLINT || sqlType == INTEGER || sqlType == BIGINT || sqlType == DATE) {
-            return bloomFilter.findHash(bloomFilter.hash(asLong(predicateValue)));
-        }
-        else if (sqlType == DOUBLE) {
-            return bloomFilter.findHash(bloomFilter.hash(predicateValue));
-        }
-        else if (sqlType == REAL) {
-            return bloomFilter.findHash(bloomFilter.hash(intBitsToFloat(toIntExact(((Number) predicateValue).intValue()))));
-        }
-        else if (sqlType instanceof VarcharType || sqlType instanceof CharType || sqlType instanceof VarbinaryType || sqlType instanceof UuidType) {
-            return bloomFilter.findHash(bloomFilter.hash(Binary.fromConstantByteBuffer(((Slice) predicateValue).toByteBuffer())));
-        }
-        else {
-            return true;
-        }
-    }
-
     @Override
     public boolean matches(long numberOfRows, ColumnIndexStore columnIndexStore, ParquetDataSourceId id)
             throws ParquetCorruptionException
@@ -273,6 +199,43 @@ public class TupleDomainParquetPredicate
             }
         }
 
+        return true;
+    }
+
+    @Override
+    public boolean matches(BloomFilterStore bloomFilterStore)
+    {
+        requireNonNull(bloomFilterStore, "bloomFilterStore is null");
+
+        if (effectivePredicate.isNone()) {
+            return false;
+        }
+        Map<ColumnDescriptor, Domain> effectivePredicateDomains = effectivePredicate.getDomains()
+                .orElseThrow(() -> new IllegalStateException("Effective predicate other than none should have domains"));
+
+        for (ColumnDescriptor column : columns) {
+            Domain effectivePredicateDomain = effectivePredicateDomains.get(column);
+
+            // the bloom filter bitset contains only non-null values so isn't helpful
+            if (effectivePredicateDomain == null || effectivePredicateDomain.isNullAllowed()) {
+                continue;
+            }
+
+            Optional<Collection<Object>> discreteValues = extractDiscreteValues(domainCompactionThreshold, effectivePredicateDomain.getValues());
+            // values are not discrete, so bloom filter isn't helpful
+            if (discreteValues.isEmpty()) {
+                continue;
+            }
+
+            Optional<BloomFilter> bloomFilterOptional = bloomFilterStore.readBloomFilter(ColumnPath.get(column.getPath()));
+            if (bloomFilterOptional.isEmpty()) {
+                continue;
+            }
+            BloomFilter bloomFilter = bloomFilterOptional.get();
+            if (!discreteValues.get().stream().anyMatch(value -> checkInBloomFilter(bloomFilter, value, effectivePredicateDomain.getType()))) {
+                return false;
+            }
+        }
         return true;
     }
 
@@ -782,5 +745,42 @@ public class TupleDomainParquetPredicate
         {
             super(columnPath, Integer.class);
         }
+    }
+
+    /**
+     * Check if the predicateValue might be in the bloomfilter
+     *
+     * @param bloomFilter parquet bloomfilter.
+     * @param predicateValue effective discrete predicate value.
+     * @param sqlType Type that contains information about the type schema from connector's metadata
+     * @return true if the predicateValue might be in the bloomfilter, false if the predicateValue absolutely is not in the bloomfilter
+     */
+    private static boolean checkInBloomFilter(BloomFilter bloomFilter, Object predicateValue, Type sqlType)
+    {
+        // todo: support TIMESTAMP, and DECIMAL
+        if (sqlType == TINYINT || sqlType == SMALLINT || sqlType == INTEGER || sqlType == BIGINT || sqlType == DATE) {
+            return bloomFilter.findHash(bloomFilter.hash(asLong(predicateValue)));
+        }
+        else if (sqlType == DOUBLE) {
+            return bloomFilter.findHash(bloomFilter.hash(predicateValue));
+        }
+        else if (sqlType == REAL) {
+            return bloomFilter.findHash(bloomFilter.hash(intBitsToFloat(toIntExact(((Number) predicateValue).intValue()))));
+        }
+        else if (sqlType instanceof VarcharType || sqlType instanceof CharType || sqlType instanceof VarbinaryType || sqlType instanceof UuidType) {
+            return bloomFilter.findHash(bloomFilter.hash(Binary.fromConstantByteBuffer(((Slice) predicateValue).toByteBuffer())));
+        }
+        else {
+            return true;
+        }
+    }
+
+    private static Optional<Collection<Object>> extractDiscreteValues(int domainCompactionThreshold, ValueSet valueSet)
+    {
+        if (!valueSet.isDiscreteSet()) {
+            return valueSet.tryExpandRanges(domainCompactionThreshold);
+        }
+
+        return Optional.of(valueSet.getDiscreteSet());
     }
 }

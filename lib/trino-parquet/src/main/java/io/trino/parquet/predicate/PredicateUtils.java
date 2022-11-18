@@ -52,7 +52,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-import static io.trino.parquet.BloomFilterStore.bloomFilterEnabled;
 import static io.trino.parquet.ParquetCompressionUtils.decompress;
 import static io.trino.parquet.ParquetTypeUtils.getParquetEncoding;
 import static io.trino.spi.type.BigintType.BIGINT;

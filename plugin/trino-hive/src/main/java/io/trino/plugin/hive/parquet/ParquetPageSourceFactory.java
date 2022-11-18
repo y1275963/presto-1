@@ -77,7 +77,7 @@ import static com.google.common.base.Strings.nullToEmpty;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static io.trino.memory.context.AggregatedMemoryContext.newSimpleAggregatedMemoryContext;
-import static io.trino.parquet.BloomFilterStore.bloomFilterEnabled;
+import static io.trino.parquet.BloomFilterStore.hasBloomFilter;
 import static io.trino.parquet.ParquetTypeUtils.constructField;
 import static io.trino.parquet.ParquetTypeUtils.getColumnIO;
 import static io.trino.parquet.ParquetTypeUtils.getDescriptors;
@@ -415,7 +415,7 @@ public class ParquetPageSourceFactory
 
         boolean hasBloomFilter = false;
         for (ColumnChunkMetaData column : blockMetadata.getColumns()) {
-            if (bloomFilterEnabled(column)) {
+            if (hasBloomFilter(column)) {
                 hasBloomFilter = true;
                 break;
             }

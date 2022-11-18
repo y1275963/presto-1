@@ -26,6 +26,8 @@ import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnPath;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
@@ -38,10 +40,11 @@ import static java.util.Objects.requireNonNull;
 
 public class BloomFilterStore
 {
-    // since bloomfilter header is relatively small(18 bytes when testing) we can read in a larger buffer(1024 bytes in this case)
+    // since bloomfilter header is relatively small(18 bytes when testing) we can read in a larger buffer(BlockSplitBloomFilter.HEADER_SIZE*4 in this case)
     // and get actual bytes used when deserializing header in order to calculate the correct offset for bloomfilter data.
-    private static final int MAX_HEADER_LENGTH = 1024;
+    private static final int MAX_HEADER_LENGTH = BlockSplitBloomFilter.HEADER_SIZE * 4;
 
+    @Nullable
     private Map<ColumnPath, BloomFilter> bloomFilterStore;
     private final ParquetDataSource dataSource;
     private final List<BloomFilterHeaderMetadata> bloomFilterHeaderReferences;
@@ -56,7 +59,7 @@ public class BloomFilterStore
         for (ColumnChunkMetaData column : block.getColumns()) {
             ColumnPath path = column.getPath();
 
-            if (bloomFilterEnabled(column) && columnsFiltered.contains(path)) {
+            if (hasBloomFilter(column) && columnsFiltered.contains(path)) {
                 bloomFilterOffsetMapBuilder.add(new BloomFilterHeaderMetadata(path, column.getBloomFilterOffset()));
             }
         }
@@ -69,10 +72,10 @@ public class BloomFilterStore
             bloomFilterStore = loadBloomFilters(dataSource, bloomFilterHeaderReferences);
         }
 
-        return Optional.ofNullable(bloomFilterStore.getOrDefault(columnPath, null));
+        return Optional.ofNullable(bloomFilterStore.get(columnPath));
     }
 
-    public static boolean bloomFilterEnabled(ColumnChunkMetaData columnMetaData)
+    public static boolean hasBloomFilter(ColumnChunkMetaData columnMetaData)
     {
         return columnMetaData.getBloomFilterOffset() > 0;
     }
