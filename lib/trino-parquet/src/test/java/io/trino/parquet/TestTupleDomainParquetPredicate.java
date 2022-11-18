@@ -748,13 +748,17 @@ public class TestTupleDomainParquetPredicate
         TupleDomainParquetPredicate testColumnValueNonExistPredicate = createTupleDomainParquetPredicate(columnDescriptor, columnType, testColumnValueNonExistSlice);
 
         BloomFilterStore bloomFilterStore = new MockBloomFilterStore(ImmutableMap.of(columnPath, bloomFilter));
-        assertTrue(testColumnValueExistPredicate.matches(columnDescriptor, columnPath, bloomFilterStore));
-        assertFalse(testColumnValueNonExistPredicate.matches(columnDescriptor, columnPath, bloomFilterStore));
+        // bloomfilter store has the column, bloomfilter hash exists in the bloom filter store's column
+        assertTrue(testColumnValueExistPredicate.matches(bloomFilterStore));
+        // bloomfilter store has the column, bloomfilter hash does not exist in the bloom filter store's column
+        assertFalse(testColumnValueNonExistPredicate.matches(bloomFilterStore));
 
-        assertTrue(testColumnValueNonExistPredicate.matches(
-                new ColumnDescriptor(new String[] {"non_exist_path"}, Types.optional(BINARY).named("Test column"), 0, 0),
-                ColumnPath.fromDotString("non_exist_path"),
-                bloomFilterStore));
+        TupleDomainParquetPredicate testColumnNonExistPredicate =
+                createTupleDomainParquetPredicate(new ColumnDescriptor(new String[] {"non_exist_path"}, Types.optional(BINARY).named("Test column"), 0, 0),
+                        columnType,
+                        testColumnValueNonExistSlice);
+        // bloomfilter store does not have the column
+        assertTrue(testColumnNonExistPredicate.matches(bloomFilterStore));
     }
 
     private TupleDomainParquetPredicate createTupleDomainParquetPredicate(ColumnDescriptor column, VarcharType columnType, Slice predicateValue)
@@ -908,7 +912,7 @@ public class TestTupleDomainParquetPredicate
 
         public Optional<BloomFilter> readBloomFilter(ColumnPath columnPath)
         {
-            return Optional.ofNullable(bloomFilterMap.getOrDefault(columnPath, null));
+            return Optional.ofNullable(bloomFilterMap.get(columnPath));
         }
     }
 

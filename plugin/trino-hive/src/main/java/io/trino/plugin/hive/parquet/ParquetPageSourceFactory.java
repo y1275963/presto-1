@@ -94,7 +94,7 @@ import static io.trino.plugin.hive.HivePageSourceProvider.projectBaseColumns;
 import static io.trino.plugin.hive.HivePageSourceProvider.projectSufficientColumns;
 import static io.trino.plugin.hive.HiveSessionProperties.getParquetMaxReadBlockSize;
 import static io.trino.plugin.hive.HiveSessionProperties.isParquetIgnoreStatistics;
-import static io.trino.plugin.hive.HiveSessionProperties.isParquetUseBloomFilter;
+import static io.trino.plugin.hive.HiveSessionProperties.useParquetBloomFilter;
 import static io.trino.plugin.hive.HiveSessionProperties.isParquetUseColumnIndex;
 import static io.trino.plugin.hive.HiveSessionProperties.isUseParquetColumnNames;
 import static io.trino.plugin.hive.parquet.ParquetPageSource.handleException;
@@ -184,7 +184,7 @@ public class ParquetPageSourceFactory
                 options.withIgnoreStatistics(isParquetIgnoreStatistics(session))
                         .withMaxReadBlockSize(getParquetMaxReadBlockSize(session))
                         .withUseColumnIndex(isParquetUseColumnIndex(session))
-                        .withUseBloomFilterIndex(isParquetUseBloomFilter(session)),
+                        .withBloomFilter(useParquetBloomFilter(session)),
                 Optional.empty(),
                 domainCompactionThreshold));
     }
@@ -410,7 +410,7 @@ public class ParquetPageSourceFactory
             TupleDomain<ColumnDescriptor> parquetTupleDomain,
             ParquetReaderOptions options)
     {
-        if (!options.isUseBloomFilterIndex()) {
+        if (!options.useBloomFilter()) {
             return Optional.empty();
         }
 

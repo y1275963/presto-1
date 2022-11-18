@@ -323,7 +323,7 @@ public final class HiveSessionProperties
                 booleanProperty(
                         PARQUET_USE_BLOOM_FILTER,
                         "Use Parquet bloomfilter",
-                        parquetReaderConfig.isUseBloomFilter(),
+                        parquetReaderConfig.useBloomFilter(),
                         false),
                 dataSizeProperty(
                         PARQUET_MAX_READ_BLOCK_SIZE,
@@ -689,7 +689,7 @@ public final class HiveSessionProperties
         return session.getProperty(PARQUET_USE_COLUMN_INDEX, Boolean.class);
     }
 
-    public static boolean isParquetUseBloomFilter(ConnectorSession session)
+    public static boolean useParquetBloomFilter(ConnectorSession session)
     {
         return session.getProperty(PARQUET_USE_BLOOM_FILTER, Boolean.class);
     }

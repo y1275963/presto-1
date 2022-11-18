@@ -107,13 +107,13 @@ public class ParquetReaderConfig
     @ConfigDescription("Enable using Parquet bloom filter")
     public ParquetReaderConfig setUseBloomFilter(boolean useBloomFilter)
     {
-        options = options.withUseBloomFilterIndex(useBloomFilter);
+        options = options.withBloomFilter(useBloomFilter);
         return this;
     }
 
-    public boolean isUseBloomFilter()
+    public boolean useBloomFilter()
     {
-        return options.isUseBloomFilterIndex();
+        return options.useBloomFilter();
     }
 
     public ParquetReaderOptions toParquetReaderOptions()
