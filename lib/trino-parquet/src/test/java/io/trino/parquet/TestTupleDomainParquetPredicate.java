@@ -900,17 +900,17 @@ public class TestTupleDomainParquetPredicate
     private static class MockBloomFilterStore
             extends BloomFilterStore
     {
-        final Map<ColumnPath, BloomFilter> bloomFilterMap;
+        private final Map<ColumnPath, BloomFilter> bloomFilterStore;
 
-        MockBloomFilterStore(Map<ColumnPath, BloomFilter> bloomFilterMap)
+        MockBloomFilterStore(Map<ColumnPath, BloomFilter> bloomFilterStore)
         {
             super(new MockParquetDataSource(), new BlockMetaData(), new HashSet<>());
-            this.bloomFilterMap = requireNonNull(bloomFilterMap);
+            this.bloomFilterStore = requireNonNull(bloomFilterStore);
         }
 
         public Optional<BloomFilter> readBloomFilter(ColumnPath columnPath)
         {
-            return Optional.ofNullable(bloomFilterMap.get(columnPath));
+            return Optional.ofNullable(bloomFilterStore.get(columnPath));
         }
     }
 
@@ -923,9 +923,7 @@ public class TestTupleDomainParquetPredicate
         }
 
         @Override
-        protected void readInternal(long position, byte[] buffer, int bufferOffset, int bufferLength)
-                throws IOException
-        {}
+        protected void readInternal(long position, byte[] buffer, int bufferOffset, int bufferLength) {}
     }
 
     private static long getBloomFilterHash(BloomFilter bloomFilter, Slice predicateValue, Type sqlType)

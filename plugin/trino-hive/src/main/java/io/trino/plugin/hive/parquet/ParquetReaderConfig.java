@@ -111,7 +111,7 @@ public class ParquetReaderConfig
         return this;
     }
 
-    public boolean useBloomFilter()
+    public boolean isUseBloomFilter()
     {
         return options.useBloomFilter();
     }
