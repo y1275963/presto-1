@@ -44,8 +44,6 @@ import org.apache.parquet.column.values.bloomfilter.BloomFilter;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnPath;
-import org.apache.parquet.hadoop.metadata.FileMetaData;
-import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.apache.parquet.internal.column.columnindex.BoundaryOrder;
 import org.apache.parquet.internal.column.columnindex.ColumnIndex;
 import org.apache.parquet.internal.column.columnindex.ColumnIndexBuilder;
@@ -748,9 +746,9 @@ public class TestTupleDomainParquetPredicate
         TupleDomainParquetPredicate testColumnValueNonExistPredicate = createTupleDomainParquetPredicate(columnDescriptor, columnType, testColumnValueNonExistSlice);
 
         BloomFilterStore bloomFilterStore = new MockBloomFilterStore(ImmutableMap.of(columnPath, bloomFilter));
-        // bloomfilter store has the column, bloomfilter hash exists in the bloom filter store's column
+        // bloomfilter store has the column, hash exists
         assertTrue(testColumnValueExistPredicate.matches(bloomFilterStore));
-        // bloomfilter store has the column, bloomfilter hash does not exist in the bloom filter store's column
+        // bloomfilter store has the column, hash does not exist
         assertFalse(testColumnValueNonExistPredicate.matches(bloomFilterStore));
 
         TupleDomainParquetPredicate testColumnNonExistPredicate =
@@ -906,7 +904,7 @@ public class TestTupleDomainParquetPredicate
 
         MockBloomFilterStore(Map<ColumnPath, BloomFilter> bloomFilterMap)
         {
-            super(new MockParquetDataSource(), new ParquetMetadata(null, null), new BlockMetaData(), new HashSet<>());
+            super(new MockParquetDataSource(), new BlockMetaData(), new HashSet<>());
             this.bloomFilterMap = requireNonNull(bloomFilterMap);
         }
 
