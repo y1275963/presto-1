@@ -23,6 +23,9 @@ import io.trino.parquet.DictionaryPage;
 import io.trino.parquet.ParquetCorruptionException;
 import io.trino.parquet.ParquetDataSourceId;
 import io.trino.parquet.dictionary.Dictionary;
+import io.trino.parquet.writer.valuewriter.BigintValueWriter;
+import io.trino.parquet.writer.valuewriter.DateValueWriter;
+import io.trino.parquet.writer.valuewriter.IntegerValueWriter;
 import io.trino.plugin.base.type.TrinoTimestampEncoder;
 import io.trino.spi.predicate.Domain;
 import io.trino.spi.predicate.Range;
@@ -759,17 +762,23 @@ public class TupleDomainParquetPredicate
     public static boolean checkInBloomFilter(BloomFilter bloomFilter, Object predicateValue, Type sqlType)
     {
         // todo: support TIMESTAMP, and DECIMAL
-        if (sqlType == TINYINT || sqlType == SMALLINT || sqlType == INTEGER || sqlType == BIGINT || sqlType == DATE) {
-            return bloomFilter.findHash(bloomFilter.hash((int) asLong(predicateValue)));
+        if (INTEGER.equals(sqlType) || SMALLINT.equals(sqlType) || TINYINT.equals(sqlType) || DATE.equals(sqlType)) {
+            return bloomFilter.findHash(bloomFilter.hash(toIntExact(((Number) predicateValue).longValue())));
+        }
+        if (BIGINT.equals(sqlType)) {
+            return bloomFilter.findHash(bloomFilter.hash(((Number) predicateValue).longValue()));
         }
         else if (sqlType == DOUBLE) {
             return bloomFilter.findHash(bloomFilter.hash(predicateValue));
         }
         else if (sqlType == REAL) {
-            return bloomFilter.findHash(bloomFilter.hash(intBitsToFloat(toIntExact(((Number) predicateValue).intValue()))));
+            return bloomFilter.findHash(bloomFilter.hash(intBitsToFloat(toIntExact(((Number) predicateValue).longValue()))));
         }
-        else if (sqlType instanceof VarcharType || sqlType instanceof CharType || sqlType instanceof VarbinaryType || sqlType instanceof UuidType) {
+        else if (sqlType instanceof VarcharType || sqlType instanceof CharType || sqlType instanceof VarbinaryType) {
             return bloomFilter.findHash(bloomFilter.hash(Binary.fromConstantByteBuffer(((Slice) predicateValue).toByteBuffer())));
+        }
+        else if (sqlType instanceof UuidType) {
+            return bloomFilter.findHash(bloomFilter.hash(Binary.fromConstantByteArray(((Slice) predicateValue).getBytes())));
         }
 
         return true;

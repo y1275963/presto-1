@@ -25,6 +25,7 @@ import org.apache.parquet.format.Util;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnPath;
+import org.apache.parquet.io.ParquetDecodingException;
 
 import javax.annotation.Nullable;
 
@@ -80,11 +81,11 @@ public class BloomFilterStore
         return columnMetaData.getBloomFilterOffset() > 0;
     }
 
-    private static boolean bloomFilterSupported(BloomFilterHeader bloomFilterHeader)
+    private static boolean bloomFilterSupported(ColumnPath columnPath, BloomFilterHeader bloomFilterHeader)
     {
         int numBytes = bloomFilterHeader.getNumBytes();
         if (numBytes <= 0 || numBytes > BlockSplitBloomFilter.UPPER_BOUND_BYTES) {
-            return false;
+            throw new ParquetDecodingException(String.format("Column: %s has bloom filter number of bytes value of %d, which is out of bound of lower limit: %d and upper limit: %d", columnPath, numBytes, 0, BlockSplitBloomFilter.UPPER_BOUND_BYTES));
         }
         return bloomFilterHeader.getHash().isSetXXHASH() && bloomFilterHeader.getAlgorithm().isSetBLOCK() && bloomFilterHeader.getCompression().isSetUNCOMPRESSED();
     }
@@ -104,7 +105,7 @@ public class BloomFilterStore
                 BasicSliceInput sliceInput = getOnlyElement(headerChunkReaders.get(column.path())).readUnchecked().getInput();
                 BloomFilterHeader bloomFilterHeader = Util.readBloomFilterHeader(sliceInput);
 
-                if (bloomFilterSupported(bloomFilterHeader)) {
+                if (bloomFilterSupported(column.path(), bloomFilterHeader)) {
                     long headerSize = sliceInput.position();
                     long bloomFilterDataOffSet = column.headerOffSet() + headerSize;
 

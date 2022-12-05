@@ -125,7 +125,7 @@ public class HudiPageSourceProvider
     private final FileFormatDataSourceStats dataSourceStats;
     private final ParquetReaderOptions options;
     private final DateTimeZone timeZone;
-    public static final int DOMAIN_COMPACTION_THRESHOLD = 1000;
+    private static final int DOMAIN_COMPACTION_THRESHOLD = 1000;
 
     @Inject
     public HudiPageSourceProvider(
