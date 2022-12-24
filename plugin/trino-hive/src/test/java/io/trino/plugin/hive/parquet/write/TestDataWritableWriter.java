@@ -358,7 +358,7 @@ public class TestDataWritableWriter
                 recordConsumer.addBinary(Binary.fromString(v));
                 break;
             case CHAR:
-                String vChar = ((HiveCharObjectInspector) inspector).getPrimitiveJavaObject(value).getStrippedValue();
+                String vChar = ((HiveCharObjectInspector) inspector).getPrimitiveJavaObject(value).getPaddedValue();
                 recordConsumer.addBinary(Binary.fromString(vChar));
                 break;
             case VARCHAR:

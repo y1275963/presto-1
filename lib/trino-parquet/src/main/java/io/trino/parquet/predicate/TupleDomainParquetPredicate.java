@@ -18,6 +18,7 @@ import com.google.common.base.VerifyException;
 import com.google.common.collect.ImmutableList;
 import io.airlift.slice.Slice;
 import io.airlift.slice.Slices;
+import io.trino.parquet.BloomFilterStore;
 import io.trino.parquet.DictionaryPage;
 import io.trino.parquet.ParquetCorruptionException;
 import io.trino.parquet.ParquetDataSourceId;
@@ -31,9 +32,12 @@ import io.trino.spi.type.DecimalType;
 import io.trino.spi.type.Int128;
 import io.trino.spi.type.TimestampType;
 import io.trino.spi.type.Type;
+import io.trino.spi.type.UuidType;
+import io.trino.spi.type.VarbinaryType;
 import io.trino.spi.type.VarcharType;
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.statistics.Statistics;
+import org.apache.parquet.column.values.bloomfilter.BloomFilter;
 import org.apache.parquet.filter2.predicate.FilterApi;
 import org.apache.parquet.filter2.predicate.FilterPredicate;
 import org.apache.parquet.filter2.predicate.Operators;
@@ -51,6 +55,7 @@ import org.joda.time.DateTimeZone;
 import java.io.Serializable;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -62,6 +67,7 @@ import static io.trino.parquet.ParquetTimestampUtils.decodeInt96Timestamp;
 import static io.trino.parquet.ParquetTypeUtils.getShortDecimalValue;
 import static io.trino.parquet.predicate.PredicateUtils.isStatisticsOverflow;
 import static io.trino.plugin.base.type.TrinoTimestampEncoderFactory.createTimestampEncoder;
+import static io.trino.spi.predicate.TupleDomain.extractDiscreteValues;
 import static io.trino.spi.type.BigintType.BIGINT;
 import static io.trino.spi.type.BooleanType.BOOLEAN;
 import static io.trino.spi.type.DateType.DATE;
@@ -71,6 +77,8 @@ import static io.trino.spi.type.RealType.REAL;
 import static io.trino.spi.type.SmallintType.SMALLINT;
 import static io.trino.spi.type.TinyintType.TINYINT;
 import static java.lang.Float.floatToRawIntBits;
+import static java.lang.Float.intBitsToFloat;
+import static java.lang.Math.toIntExact;
 import static java.lang.String.format;
 import static java.nio.ByteOrder.LITTLE_ENDIAN;
 import static java.util.Objects.requireNonNull;
@@ -82,12 +90,14 @@ public class TupleDomainParquetPredicate
     private final TupleDomain<ColumnDescriptor> effectivePredicate;
     private final List<ColumnDescriptor> columns;
     private final DateTimeZone timeZone;
+    private final int domainCompactionThreshold;
 
-    public TupleDomainParquetPredicate(TupleDomain<ColumnDescriptor> effectivePredicate, List<ColumnDescriptor> columns, DateTimeZone timeZone)
+    public TupleDomainParquetPredicate(TupleDomain<ColumnDescriptor> effectivePredicate, List<ColumnDescriptor> columns, DateTimeZone timeZone, int domainCompactionThreshold)
     {
         this.effectivePredicate = requireNonNull(effectivePredicate, "effectivePredicate is null");
         this.columns = ImmutableList.copyOf(requireNonNull(columns, "columns is null"));
         this.timeZone = requireNonNull(timeZone, "timeZone is null");
+        this.domainCompactionThreshold = domainCompactionThreshold;
     }
 
     /**
@@ -215,6 +225,47 @@ public class TupleDomainParquetPredicate
             }
         }
 
+        return true;
+    }
+
+    /**
+     * Should the Parquet Reader process a file section with the specified bloomfilter store
+     *
+     * @param bloomFilterStore The single column bloomFilterStore
+     */
+    public boolean matches(BloomFilterStore bloomFilterStore)
+    {
+        requireNonNull(bloomFilterStore, "bloomFilterStore is null");
+
+        if (effectivePredicate.isNone()) {
+            return false;
+        }
+        Map<ColumnDescriptor, Domain> effectivePredicateDomains = effectivePredicate.getDomains()
+                .orElseThrow(() -> new IllegalStateException("Effective predicate other than none should have domains"));
+
+        for (ColumnDescriptor column : columns) {
+            Domain effectivePredicateDomain = effectivePredicateDomains.get(column);
+
+            // the bloom filter bitset contains only non-null values so isn't helpful
+            if (effectivePredicateDomain == null || effectivePredicateDomain.isNullAllowed()) {
+                continue;
+            }
+
+            Optional<Collection<Object>> discreteValues = extractDiscreteValues(domainCompactionThreshold, effectivePredicateDomain.getValues());
+            // values are not discrete, so bloom filter isn't helpful
+            if (discreteValues.isEmpty()) {
+                continue;
+            }
+
+            Optional<BloomFilter> bloomFilterOptional = bloomFilterStore.getBloomFilter(ColumnPath.get(column.getPath()));
+            if (bloomFilterOptional.isEmpty()) {
+                continue;
+            }
+            BloomFilter bloomFilter = bloomFilterOptional.get();
+            if (discreteValues.get().stream().noneMatch(value -> checkInBloomFilter(bloomFilter, value, effectivePredicateDomain.getType()))) {
+                return false;
+            }
+        }
         return true;
     }
 
@@ -574,6 +625,49 @@ public class TupleDomainParquetPredicate
         }
 
         throw new IllegalArgumentException("Can't convert value to long: " + value.getClass().getName());
+    }
+
+    /**
+     * Check if the predicateValue might be in the bloomfilter
+     *
+     * @param bloomFilter parquet bloomfilter.
+     * @param predicateValue effective discrete predicate value.
+     * @param sqlType Type that contains information about the type schema from connector's metadata
+     * @return true if the predicateValue might be in the bloomfilter, false if the predicateValue absolutely is not in the bloomfilter
+     */
+    @VisibleForTesting
+    public static boolean checkInBloomFilter(BloomFilter bloomFilter, Object predicateValue, Type sqlType)
+    {
+        // todo: support TIMESTAMP, Char and DECIMAL
+        if (INTEGER.equals(sqlType) || SMALLINT.equals(sqlType) || TINYINT.equals(sqlType) || DATE.equals(sqlType)) {
+            return bloomFilter.findHash(bloomFilter.hash(toIntExact(((Number) predicateValue).longValue())));
+        }
+        if (BIGINT.equals(sqlType)) {
+            return bloomFilter.findHash(bloomFilter.hash(((Number) predicateValue).longValue()));
+        }
+        else if (sqlType == DOUBLE) {
+            return bloomFilter.findHash(bloomFilter.hash(((Double) predicateValue).doubleValue()));
+        }
+        else if (sqlType == REAL) {
+            return bloomFilter.findHash(bloomFilter.hash(intBitsToFloat(toIntExact(((Number) predicateValue).longValue()))));
+        }
+        else if (sqlType instanceof VarcharType || sqlType instanceof VarbinaryType) {
+            return bloomFilter.findHash(bloomFilter.hash(Binary.fromConstantByteBuffer(((Slice) predicateValue).toByteBuffer())));
+        }
+        else if (sqlType instanceof UuidType) {
+            return bloomFilter.findHash(bloomFilter.hash(Binary.fromConstantByteArray(((Slice) predicateValue).getBytes())));
+        }
+
+        return true;
+    }
+
+    private static Optional<Collection<Object>> extractDiscreteValues(int domainCompactionThreshold, ValueSet valueSet)
+    {
+        if (!valueSet.isDiscreteSet()) {
+            return valueSet.tryExpandRanges(domainCompactionThreshold);
+        }
+
+        return Optional.of(valueSet.getDiscreteSet());
     }
 
     private FilterPredicate convertToParquetFilter(DateTimeZone timeZone)
