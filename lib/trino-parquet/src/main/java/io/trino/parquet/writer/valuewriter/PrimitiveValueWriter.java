@@ -19,7 +19,10 @@ import org.apache.parquet.column.Encoding;
 import org.apache.parquet.column.page.DictionaryPage;
 import org.apache.parquet.column.statistics.Statistics;
 import org.apache.parquet.column.values.ValuesWriter;
+import org.apache.parquet.column.values.bloomfilter.BloomFilter;
 import org.apache.parquet.schema.PrimitiveType;
+
+import java.util.Optional;
 
 import static java.util.Objects.requireNonNull;
 
@@ -27,13 +30,21 @@ public abstract class PrimitiveValueWriter
         extends ValuesWriter
 {
     private Statistics<?> statistics;
+    private Optional<BloomFilter> bloomFilterOptional;
     private final PrimitiveType parquetType;
     private final ValuesWriter valuesWriter;
 
     public PrimitiveValueWriter(PrimitiveType parquetType, ValuesWriter valuesWriter)
     {
+        this(parquetType, valuesWriter, Optional.empty());
+    }
+
+    public PrimitiveValueWriter(PrimitiveType parquetType, ValuesWriter valuesWriter, Optional<BloomFilter> bloomFilterOptional)
+    {
         this.parquetType = requireNonNull(parquetType, "parquetType is null");
         this.valuesWriter = requireNonNull(valuesWriter, "valuesWriter is null");
+        this.bloomFilterOptional = requireNonNull(bloomFilterOptional, "bloomFilterOptional is null");
+
         this.statistics = Statistics.createStats(parquetType);
     }
 
@@ -45,6 +56,10 @@ public abstract class PrimitiveValueWriter
     public Statistics<?> getStatistics()
     {
         return statistics;
+    }
+
+    public Optional<BloomFilter> getBloomFilter() {
+        return bloomFilterOptional;
     }
 
     protected int getTypeLength()

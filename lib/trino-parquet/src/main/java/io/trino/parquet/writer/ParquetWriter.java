@@ -20,6 +20,7 @@ import io.airlift.slice.OutputStreamSliceOutput;
 import io.airlift.slice.Slice;
 import io.airlift.slice.Slices;
 import io.airlift.units.DataSize;
+import io.trino.parquet.BloomFilterStore;
 import io.trino.parquet.Field;
 import io.trino.parquet.ParquetCorruptionException;
 import io.trino.parquet.ParquetDataSource;
@@ -31,6 +32,7 @@ import io.trino.parquet.writer.ColumnWriter.BufferData;
 import io.trino.spi.Page;
 import io.trino.spi.type.Type;
 import org.apache.parquet.column.ParquetProperties;
+import org.apache.parquet.column.values.bloomfilter.BloomFilter;
 import org.apache.parquet.format.ColumnMetaData;
 import org.apache.parquet.format.CompressionCodec;
 import org.apache.parquet.format.FileMetaData;
@@ -93,6 +95,8 @@ public class ParquetWriter
     private final Optional<DateTimeZone> parquetTimeZone;
 
     private final ImmutableList.Builder<RowGroup> rowGroupBuilder = ImmutableList.builder();
+    private final ImmutableList.Builder<BloomFilterWriteStore> bloomFilterBuilder = ImmutableList.builder();
+
     private final Optional<ParquetWriteValidationBuilder> validationBuilder;
 
     private List<ColumnWriter> columnWriters;
@@ -217,7 +221,12 @@ public class ParquetWriter
         try (outputStream) {
             columnWriters.forEach(ColumnWriter::close);
             flush();
-            writeFooter();
+
+            List<RowGroup> allRowGroups = rowGroupBuilder.build();
+            List<BloomFilterWriteStore> allBloomFilters = bloomFilterBuilder.build();
+
+            writeBloomFilters(allRowGroups, allBloomFilters);
+            writeFooter(allRowGroups);
         }
         bufferedBytes = 0;
     }
@@ -302,12 +311,16 @@ public class ParquetWriter
             writeHeader = true;
         }
 
-        // get all data in buffer
+        // get all data and bloomfilters in buffer
         ImmutableList.Builder<BufferData> builder = ImmutableList.builder();
+        BloomFilterWriteStore.BloomFilterWriteStoreBuilder bloomFilterWriteStoreBuilder = new BloomFilterWriteStore.BloomFilterWriteStoreBuilder();
+
         for (ColumnWriter columnWriter : columnWriters) {
             columnWriter.getBuffer().forEach(builder::add);
+            bloomFilterWriteStoreBuilder.addAll(columnWriter.getBloomFilterWriteStore());
         }
         List<BufferData> bufferDataList = builder.build();
+        BloomFilterWriteStore currentRowGroupBloomfilters = bloomFilterWriteStoreBuilder.build();
 
         if (rows == 0) {
             // Avoid writing empty row groups as these are ignored by the reader
@@ -323,6 +336,8 @@ public class ParquetWriter
                 .map(BufferData::getMetaData)
                 .collect(toImmutableList());
         updateRowGroups(updateColumnMetadataOffset(metadatas, stripeStartOffset));
+        // update bloomfilters
+        bloomFilterBuilder.add(currentRowGroupBloomfilters);
 
         // flush pages
         bufferDataList.stream()
@@ -331,11 +346,30 @@ public class ParquetWriter
                 .forEach(data -> data.writeData(outputStream));
     }
 
-    private void writeFooter()
+    private void writeBloomFilters(List<RowGroup> rowGroups, List<BloomFilterWriteStore> bloomFilterWriteStores) {
+        verify(bloomFilterWriteStores.size() == rowGroups.size());
+        // write bloomfilters and update
+        for (int i = 0; i < rowGroups.size(); i++) {
+            RowGroup currentRowGroup = rowGroups.get(i);
+            BloomFilterWriteStore currentBloomFilterStore = bloomFilterWriteStores.get(i);
+            for (org.apache.parquet.format.ColumnChunk columnChunk : currentRowGroup.getColumns()) {
+                String path =  getPath(columnChunk.getMeta_data().getPath_in_schema().toArray(new String[0]));
+                if (currentBloomFilterStore.getBloomFilter(path).isPresent()) {
+                    // todo: do not write if only RLE page or Dictionary page
+                    // todo, here we write the bloomfilter to the stream
+                    // todo, here we set the offset in columnChunk.getMeta_data().setBloom_filter_offset()
+                    System.out.println("bloomfilter path on: " + path);
+                    System.out.println("bloomfitler: " + currentBloomFilterStore.getBloomFilter(path).get());
+                }
+            }
+        }
+    }
+
+    private void writeFooter(List<RowGroup> rowGroups)
             throws IOException
     {
         checkState(closed);
-        List<RowGroup> rowGroups = rowGroupBuilder.build();
+
         Slice footer = getFooter(rowGroups, messageType);
         recordValidation(validation -> validation.setRowGroups(rowGroups));
         createDataOutput(footer).writeData(outputStream);
@@ -406,11 +440,17 @@ public class ParquetWriter
 
     private void initColumnWriters()
     {
+        // todo respect bloom filter configs here
         ParquetProperties parquetProperties = ParquetProperties.builder()
                 .withWriterVersion(PARQUET_1_0)
                 .withPageSize(writerOption.getMaxPageSize())
+                .withBloomFilterEnabled("test", true)
                 .build();
 
         this.columnWriters = ParquetWriters.getColumnWriters(messageType, primitiveTypes, parquetProperties, compressionCodec, parquetTimeZone);
+    }
+
+    public static String getPath(String[] paths) {
+        return String.join(".", paths);
     }
 }

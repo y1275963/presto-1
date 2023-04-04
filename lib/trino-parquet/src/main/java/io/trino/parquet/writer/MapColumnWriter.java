@@ -87,4 +87,13 @@ public class MapColumnWriter
     {
         return INSTANCE_SIZE + keyWriter.getRetainedBytes() + valueWriter.getRetainedBytes();
     }
+
+    @Override
+    public BloomFilterWriteStore getBloomFilterWriteStore()
+    {
+        BloomFilterWriteStore.BloomFilterWriteStoreBuilder builder = new BloomFilterWriteStore.BloomFilterWriteStoreBuilder();
+        builder.addAll(keyWriter.getBloomFilterWriteStore());
+        builder.addAll(valueWriter.getBloomFilterWriteStore());
+        return builder.build();
+    }
 }

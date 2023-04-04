@@ -100,4 +100,15 @@ public class StructColumnWriter
         return INSTANCE_SIZE +
                 columnWriters.stream().mapToLong(ColumnWriter::getRetainedBytes).sum();
     }
+
+    @Override
+    public BloomFilterWriteStore getBloomFilterWriteStore()
+    {
+        BloomFilterWriteStore.BloomFilterWriteStoreBuilder bloomFilterWriteStoreBuilder = new BloomFilterWriteStore.BloomFilterWriteStoreBuilder();
+        for (ColumnWriter writer : columnWriters) {
+            bloomFilterWriteStoreBuilder.addAll(writer.getBloomFilterWriteStore());
+        }
+
+        return bloomFilterWriteStoreBuilder.build();
+    }
 }

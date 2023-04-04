@@ -26,6 +26,7 @@ import org.apache.parquet.column.Encoding;
 import org.apache.parquet.column.page.DictionaryPage;
 import org.apache.parquet.column.statistics.Statistics;
 import org.apache.parquet.column.values.ValuesWriter;
+import org.apache.parquet.column.values.bloomfilter.BloomFilter;
 import org.apache.parquet.format.ColumnMetaData;
 import org.apache.parquet.format.CompressionCodec;
 import org.apache.parquet.format.PageEncodingStats;
@@ -42,6 +43,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import static com.google.common.base.Preconditions.checkState;
@@ -49,6 +51,7 @@ import static com.google.common.collect.ImmutableList.toImmutableList;
 import static io.airlift.slice.SizeOf.instanceSize;
 import static io.trino.parquet.writer.ParquetCompressor.getCompressor;
 import static io.trino.parquet.writer.ParquetDataOutput.createDataOutput;
+import static io.trino.parquet.writer.ParquetWriter.getPath;
 import static io.trino.parquet.writer.repdef.DefLevelWriterProvider.DefinitionLevelWriter;
 import static io.trino.parquet.writer.repdef.DefLevelWriterProvider.getRootDefinitionLevelWriter;
 import static java.lang.Math.toIntExact;
@@ -96,7 +99,13 @@ public class PrimitiveColumnWriter
     private long bufferedBytes;
     private long pageBufferedBytes;
 
-    public PrimitiveColumnWriter(ColumnDescriptor columnDescriptor, PrimitiveValueWriter primitiveValueWriter, ValuesWriter definitionLevelWriter, ValuesWriter repetitionLevelWriter, CompressionCodec compressionCodec, int pageSizeThreshold)
+    public PrimitiveColumnWriter(
+            ColumnDescriptor columnDescriptor,
+            PrimitiveValueWriter primitiveValueWriter,
+            ValuesWriter definitionLevelWriter,
+            ValuesWriter repetitionLevelWriter,
+            CompressionCodec compressionCodec,
+            int pageSizeThreshold)
     {
         this.columnDescriptor = requireNonNull(columnDescriptor, "columnDescriptor is null");
         this.maxDefinitionLevel = columnDescriptor.getMaxDefinitionLevel();
@@ -159,7 +168,7 @@ public class PrimitiveColumnWriter
         return ImmutableList.of(new BufferData(getDataStreams(), getColumnMetaData()));
     }
 
-    // Returns ColumnMetaData that offset is invalid
+    // Returns ColumnMetaData that offset is invalid, bloomftiler offset is also invalid
     private ColumnMetaData getColumnMetaData()
     {
         checkState(getDataStreamsCalled);
@@ -299,6 +308,16 @@ public class PrimitiveColumnWriter
                 primitiveValueWriter.getAllocatedSize() +
                 definitionLevelWriter.getAllocatedSize() +
                 repetitionLevelWriter.getAllocatedSize();
+    }
+
+    @Override
+    public BloomFilterWriteStore getBloomFilterWriteStore()
+    {
+        if (primitiveValueWriter.getBloomFilter().isPresent()) {
+            return new BloomFilterWriteStore(getPath(columnDescriptor.getPath()), primitiveValueWriter.getBloomFilter().get());
+        } else {
+            return new BloomFilterWriteStore();
+        }
     }
 
     private void updateBufferedBytes()

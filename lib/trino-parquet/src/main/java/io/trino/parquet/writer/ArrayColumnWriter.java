@@ -83,4 +83,10 @@ public class ArrayColumnWriter
     {
         return INSTANCE_SIZE + elementWriter.getRetainedBytes();
     }
+
+    @Override
+    public BloomFilterWriteStore getBloomFilterWriteStore()
+    {
+        return elementWriter.getBloomFilterWriteStore();
+    }
 }

@@ -16,7 +16,10 @@ package io.trino.parquet.writer.valuewriter;
 import io.trino.spi.block.Block;
 import io.trino.spi.type.Type;
 import org.apache.parquet.column.values.ValuesWriter;
+import org.apache.parquet.column.values.bloomfilter.BloomFilter;
 import org.apache.parquet.schema.PrimitiveType;
+
+import java.util.Optional;
 
 import static java.util.Objects.requireNonNull;
 
@@ -25,9 +28,9 @@ public class IntegerValueWriter
 {
     private final Type type;
 
-    public IntegerValueWriter(ValuesWriter valuesWriter, Type type, PrimitiveType parquetType)
+    public IntegerValueWriter(ValuesWriter valuesWriter, Type type, PrimitiveType parquetType, Optional<BloomFilter> bloomFilterOptional)
     {
-        super(parquetType, valuesWriter);
+        super(parquetType, valuesWriter, bloomFilterOptional);
         this.type = requireNonNull(type, "type is null");
     }
 
@@ -39,6 +42,10 @@ public class IntegerValueWriter
                 int value = (int) type.getLong(block, i);
                 getValueWriter().writeInteger(value);
                 getStatistics().updateStats(value);
+                // todo: update bloomfilter here
+                if (getBloomFilter().isPresent()) {
+//                    System.out.println("bloomfilter is available");
+                }
             }
         }
     }

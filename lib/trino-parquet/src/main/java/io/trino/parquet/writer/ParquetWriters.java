@@ -44,6 +44,8 @@ import io.trino.spi.type.VarcharType;
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.ParquetProperties;
 import org.apache.parquet.column.values.ValuesWriter;
+import org.apache.parquet.column.values.bloomfilter.BlockSplitBloomFilter;
+import org.apache.parquet.column.values.bloomfilter.BloomFilter;
 import org.apache.parquet.format.CompressionCodec;
 import org.apache.parquet.schema.GroupType;
 import org.apache.parquet.schema.LogicalTypeAnnotation;
@@ -57,6 +59,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.function.Predicate;
 
 import static com.google.common.base.Preconditions.checkArgument;
@@ -166,13 +169,34 @@ final class ParquetWriters
             int fieldRepetitionLevel = type.getMaxRepetitionLevel(path);
             ColumnDescriptor columnDescriptor = new ColumnDescriptor(path, primitive, fieldRepetitionLevel, fieldDefinitionLevel);
             Type trinoType = requireNonNull(trinoTypes.get(ImmutableList.copyOf(path)), "Trino type is null");
+            Optional<BloomFilter> bloomFilterOptional = getColumnChunkBloomFilter(columnDescriptor);
+
             return new PrimitiveColumnWriter(
                     columnDescriptor,
-                    getValueWriter(parquetProperties.newValuesWriter(columnDescriptor), trinoType, columnDescriptor.getPrimitiveType(), parquetTimeZone),
+                    getValueWriter(parquetProperties.newValuesWriter(columnDescriptor), trinoType, columnDescriptor.getPrimitiveType(), parquetTimeZone, bloomFilterOptional),
                     parquetProperties.newDefinitionLevelWriter(columnDescriptor),
                     parquetProperties.newRepetitionLevelWriter(columnDescriptor),
                     compressionCodec,
                     parquetProperties.getPageSizeThreshold());
+        }
+
+        private Optional<BloomFilter> getColumnChunkBloomFilter(ColumnDescriptor columnDescriptor) {
+            boolean isBloomFilterEnabled = parquetProperties.isBloomFilterEnabled(columnDescriptor);
+
+            if (isBloomFilterEnabled) {
+                BloomFilter bloomFilter = null;
+                int maxBloomFilterSize = parquetProperties.getMaxBloomFilterBytes();
+                OptionalLong ndv = parquetProperties.getBloomFilterNDV(columnDescriptor);
+
+                if (ndv.isPresent()) {
+                    int optimalNumOfBits = BlockSplitBloomFilter.optimalNumOfBits(ndv.getAsLong(), BlockSplitBloomFilter.DEFAULT_FPP);
+                    bloomFilter = new BlockSplitBloomFilter(optimalNumOfBits / 8, maxBloomFilterSize);
+                } else {
+                    bloomFilter = new BlockSplitBloomFilter(maxBloomFilterSize);
+                }
+                return Optional.of(bloomFilter);
+            }
+            return Optional.empty();
         }
 
         private String[] currentPath()
@@ -188,13 +212,13 @@ final class ParquetWriters
         }
     }
 
-    private static PrimitiveValueWriter getValueWriter(ValuesWriter valuesWriter, Type type, PrimitiveType parquetType, Optional<DateTimeZone> parquetTimeZone)
+    private static PrimitiveValueWriter getValueWriter(ValuesWriter valuesWriter, Type type, PrimitiveType parquetType, Optional<DateTimeZone> parquetTimeZone, Optional<BloomFilter> bloomFilterOptional)
     {
         if (BOOLEAN.equals(type)) {
             return new BooleanValueWriter(valuesWriter, parquetType);
         }
         if (INTEGER.equals(type) || SMALLINT.equals(type) || TINYINT.equals(type)) {
-            return new IntegerValueWriter(valuesWriter, type, parquetType);
+            return new IntegerValueWriter(valuesWriter, type, parquetType, bloomFilterOptional);
         }
         if (BIGINT.equals(type)) {
             return new BigintValueWriter(valuesWriter, type, parquetType);

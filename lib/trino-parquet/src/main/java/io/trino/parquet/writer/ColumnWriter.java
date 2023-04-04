@@ -34,6 +34,8 @@ public interface ColumnWriter
 
     long getRetainedBytes();
 
+    BloomFilterWriteStore getBloomFilterWriteStore();
+
     class BufferData
     {
         private final ColumnMetaData metaData;
