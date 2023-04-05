@@ -314,7 +314,13 @@ public class PrimitiveColumnWriter
     public BloomFilterWriteStore getBloomFilterWriteStore()
     {
         if (primitiveValueWriter.getBloomFilter().isPresent()) {
-            return new BloomFilterWriteStore(getPath(columnDescriptor.getPath()), primitiveValueWriter.getBloomFilter().get());
+            // write bloom filter if one of data pages is not dictionary encoded
+            for (Encoding encoding : encodings) {
+                if (Encoding.RLE_DICTIONARY != encoding) {
+                    return new BloomFilterWriteStore(getPath(columnDescriptor.getPath()), primitiveValueWriter.getBloomFilter().get());
+                }
+            }
+            return new BloomFilterWriteStore();
         } else {
             return new BloomFilterWriteStore();
         }

@@ -20,7 +20,6 @@ import io.airlift.slice.OutputStreamSliceOutput;
 import io.airlift.slice.Slice;
 import io.airlift.slice.Slices;
 import io.airlift.units.DataSize;
-import io.trino.parquet.BloomFilterStore;
 import io.trino.parquet.Field;
 import io.trino.parquet.ParquetCorruptionException;
 import io.trino.parquet.ParquetDataSource;
@@ -96,7 +95,7 @@ public class ParquetWriter
     private final Optional<DateTimeZone> parquetTimeZone;
 
     private final ImmutableList.Builder<RowGroup> rowGroupBuilder = ImmutableList.builder();
-    private final ImmutableList.Builder<BloomFilterWriteStore> bloomFilterBuilder = ImmutableList.builder();
+    private final ImmutableList.Builder<BloomFilterWriteStore> bloomFilterStoresBuilder = ImmutableList.builder();
 
     private final Optional<ParquetWriteValidationBuilder> validationBuilder;
 
@@ -224,7 +223,7 @@ public class ParquetWriter
             flush();
 
             List<RowGroup> allRowGroups = rowGroupBuilder.build();
-            List<BloomFilterWriteStore> allBloomFilters = bloomFilterBuilder.build();
+            List<BloomFilterWriteStore> allBloomFilters = bloomFilterStoresBuilder.build();
 
             writeBloomFilters(allRowGroups, allBloomFilters);
             writeFooter(allRowGroups);
@@ -321,7 +320,7 @@ public class ParquetWriter
             bloomFilterWriteStoreBuilder.addAll(columnWriter.getBloomFilterWriteStore());
         }
         List<BufferData> bufferDataList = builder.build();
-        BloomFilterWriteStore currentRowGroupBloomfilters = bloomFilterWriteStoreBuilder.build();
+        BloomFilterWriteStore rowGroupBloomFilterStore = bloomFilterWriteStoreBuilder.build();
 
         if (rows == 0) {
             // Avoid writing empty row groups as these are ignored by the reader
@@ -338,7 +337,7 @@ public class ParquetWriter
                 .collect(toImmutableList());
         updateRowGroups(updateColumnMetadataOffset(metadatas, stripeStartOffset));
         // update bloomfilters
-        bloomFilterBuilder.add(currentRowGroupBloomfilters);
+        bloomFilterStoresBuilder.add(rowGroupBloomFilterStore);
 
         // flush pages
         bufferDataList.stream()
@@ -351,24 +350,20 @@ public class ParquetWriter
             throws IOException
     {
         verify(bloomFilterWriteStores.size() == rowGroups.size());
-        // write bloomfilters and update
+
         for (int i = 0; i < rowGroups.size(); i++) {
             RowGroup currentRowGroup = rowGroups.get(i);
-            BloomFilterWriteStore currentBloomFilterStore = bloomFilterWriteStores.get(i);
+            BloomFilterWriteStore bloomFilterStore = bloomFilterWriteStores.get(i);
             for (org.apache.parquet.format.ColumnChunk columnChunk : currentRowGroup.getColumns()) {
                 String path =  getPath(columnChunk.getMeta_data().getPath_in_schema().toArray(new String[0]));
-                if (currentBloomFilterStore.getBloomFilter(path).isPresent()) {
-                    // todo: do not write if only RLE page or Dictionary page
-                    // todo, here we write the bloomfilter to the stream
-                    // todo, here we set the offset in columnChunk.getMeta_data().setBloom_filter_offset()
-
-                    System.out.println("bloomfilter path on: " + path);
-                    System.out.println("bloomfitler: " + currentBloomFilterStore.getBloomFilter(path).get());
+                if (bloomFilterStore.getBloomFilter(path).isPresent()) {
                     long bloomFilterStartOffset = outputStream.longSize();
                     columnChunk.getMeta_data().setBloom_filter_offset(bloomFilterStartOffset);
 
-                    BloomFilter bloomFilter = currentBloomFilterStore.getBloomFilter(path).get();
+                    BloomFilter bloomFilter = bloomFilterStore.getBloomFilter(path).get();
+                    // write bloom filter header
                     Util.writeBloomFilterHeader(ParquetMetadataConverter.toBloomFilterHeader(bloomFilter), outputStream);
+                    // write bloom filter data
                     bloomFilter.writeTo(outputStream);
                 }
             }

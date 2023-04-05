@@ -36,7 +36,7 @@ public class BloomFilterWriteStore
 
     public static class BloomFilterWriteStoreBuilder
     {
-        private ImmutableMap.Builder<String, BloomFilter> filterBuilders = new ImmutableMap.Builder();
+        final private ImmutableMap.Builder<String, BloomFilter> filterBuilders = new ImmutableMap.Builder<>();
 
         public void addAll(BloomFilterWriteStore bloomFilterWriteStore)
         {

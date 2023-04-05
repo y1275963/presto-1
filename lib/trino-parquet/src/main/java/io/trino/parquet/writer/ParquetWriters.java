@@ -180,6 +180,7 @@ final class ParquetWriters
                     parquetProperties.getPageSizeThreshold());
         }
 
+        // todo, make sure if a type is not supported, we do not add the bloomfilter in the first place
         private Optional<BloomFilter> getColumnChunkBloomFilter(ColumnDescriptor columnDescriptor) {
             boolean isBloomFilterEnabled = parquetProperties.isBloomFilterEnabled(columnDescriptor);
 

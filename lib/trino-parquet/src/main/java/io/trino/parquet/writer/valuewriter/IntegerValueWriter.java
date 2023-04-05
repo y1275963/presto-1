@@ -21,6 +21,7 @@ import org.apache.parquet.schema.PrimitiveType;
 
 import java.util.Optional;
 
+import static java.lang.Math.toIntExact;
 import static java.util.Objects.requireNonNull;
 
 public class IntegerValueWriter
@@ -44,9 +45,16 @@ public class IntegerValueWriter
                 getStatistics().updateStats(value);
                 // todo: update bloomfilter here
                 if (getBloomFilter().isPresent()) {
+
+                    long hashValue = getHash(getBloomFilter().get(), value);
+                    getBloomFilter().get().insertHash(hashValue);
 //                    System.out.println("bloomfilter is available");
                 }
             }
         }
+    }
+
+    private static long getHash(BloomFilter bloomFilter, int value) {
+        return bloomFilter.hash(toIntExact(((Number) value).longValue()));
     }
 }
