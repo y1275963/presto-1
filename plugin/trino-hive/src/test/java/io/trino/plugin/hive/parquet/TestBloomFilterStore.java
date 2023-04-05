@@ -203,6 +203,22 @@ public class TestBloomFilterStore
         }
     }
 
+    @Test
+    public void testYingjieFilter()
+            throws Exception
+    {
+        TrinoFileSystemFactory fileSystemFactory = new HdfsFileSystemFactory(HDFS_ENVIRONMENT);
+        TrinoFileSystem fileSystem = fileSystemFactory.create(getHiveSession(new HiveConfig().setHiveStorageFormat(HiveStorageFormat.PARQUET)));
+        TrinoInputFile inputFile = fileSystem.newInputFile("/var/folders/b6/3dcrh6356y3343fjwlkg7p3w001tf5/T/test2801530497324693316parquet");
+        TrinoParquetDataSource dataSource = new TrinoParquetDataSource(inputFile, new ParquetReaderOptions(), new FileFormatDataSourceStats());
+
+        ParquetMetadata parquetMetadata = MetadataReader.readFooter(dataSource, Optional.empty());
+        ColumnChunkMetaData columnChunkMetaData = getOnlyElement(getOnlyElement(parquetMetadata.getBlocks()).getColumns());
+        BloomFilterStore bloomFilterStore = new BloomFilterStore(dataSource, getOnlyElement(parquetMetadata.getBlocks()), Set.of(columnChunkMetaData.getPath()));
+        BloomFilter bloomFilter = bloomFilterStore.getBloomFilter(fromDotString("test")).get();
+        System.out.println();
+    }
+
     @Test(dataProvider = "bloomFilterTypeTests")
     public void testMatchesWithBloomFilter(BloomFilterTypeTestCase typeTestCase)
             throws Exception

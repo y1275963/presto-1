@@ -184,7 +184,7 @@ final class ParquetWriters
             boolean isBloomFilterEnabled = parquetProperties.isBloomFilterEnabled(columnDescriptor);
 
             if (isBloomFilterEnabled) {
-                BloomFilter bloomFilter = null;
+                BloomFilter bloomFilter;
                 int maxBloomFilterSize = parquetProperties.getMaxBloomFilterBytes();
                 OptionalLong ndv = parquetProperties.getBloomFilterNDV(columnDescriptor);
 

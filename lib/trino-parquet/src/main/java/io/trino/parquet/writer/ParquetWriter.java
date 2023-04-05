@@ -39,6 +39,7 @@ import org.apache.parquet.format.FileMetaData;
 import org.apache.parquet.format.KeyValue;
 import org.apache.parquet.format.RowGroup;
 import org.apache.parquet.format.Util;
+import org.apache.parquet.format.converter.ParquetMetadataConverter;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.apache.parquet.io.MessageColumnIO;
@@ -346,7 +347,9 @@ public class ParquetWriter
                 .forEach(data -> data.writeData(outputStream));
     }
 
-    private void writeBloomFilters(List<RowGroup> rowGroups, List<BloomFilterWriteStore> bloomFilterWriteStores) {
+    private void writeBloomFilters(List<RowGroup> rowGroups, List<BloomFilterWriteStore> bloomFilterWriteStores)
+            throws IOException
+    {
         verify(bloomFilterWriteStores.size() == rowGroups.size());
         // write bloomfilters and update
         for (int i = 0; i < rowGroups.size(); i++) {
@@ -358,8 +361,15 @@ public class ParquetWriter
                     // todo: do not write if only RLE page or Dictionary page
                     // todo, here we write the bloomfilter to the stream
                     // todo, here we set the offset in columnChunk.getMeta_data().setBloom_filter_offset()
+
                     System.out.println("bloomfilter path on: " + path);
                     System.out.println("bloomfitler: " + currentBloomFilterStore.getBloomFilter(path).get());
+                    long bloomFilterStartOffset = outputStream.longSize();
+                    columnChunk.getMeta_data().setBloom_filter_offset(bloomFilterStartOffset);
+
+                    BloomFilter bloomFilter = currentBloomFilterStore.getBloomFilter(path).get();
+                    Util.writeBloomFilterHeader(ParquetMetadataConverter.toBloomFilterHeader(bloomFilter), outputStream);
+                    bloomFilter.writeTo(outputStream);
                 }
             }
         }
