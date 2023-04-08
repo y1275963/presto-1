@@ -22,6 +22,7 @@ import org.apache.parquet.schema.PrimitiveType;
 import static io.trino.spi.type.UuidType.UUID;
 import static java.util.Objects.requireNonNull;
 
+// todo implement bloomfilter
 public class UuidValueWriter
         extends PrimitiveValueWriter
 {

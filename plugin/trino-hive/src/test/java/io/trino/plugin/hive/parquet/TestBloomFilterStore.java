@@ -14,6 +14,8 @@
 package io.trino.plugin.hive.parquet;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterables;
+import dev.failsafe.internal.util.Lists;
 import io.trino.filesystem.TrinoFileSystem;
 import io.trino.filesystem.TrinoFileSystemFactory;
 import io.trino.filesystem.TrinoInputFile;
@@ -25,19 +27,24 @@ import io.trino.parquet.reader.MetadataReader;
 import io.trino.plugin.hive.FileFormatDataSourceStats;
 import io.trino.plugin.hive.HiveConfig;
 import io.trino.plugin.hive.HiveStorageFormat;
+import io.trino.spi.connector.ConnectorSession;
 import io.trino.spi.predicate.Domain;
 import io.trino.spi.predicate.Range;
 import io.trino.spi.predicate.SortedRangeSet;
 import io.trino.spi.predicate.TupleDomain;
+import io.trino.spi.type.BigintType;
 import io.trino.spi.type.Type;
 import io.trino.spi.type.UuidType;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.mapred.JobConf;
 import org.apache.parquet.column.ColumnDescriptor;
+import org.apache.parquet.column.ParquetProperties;
 import org.apache.parquet.column.values.bloomfilter.BloomFilter;
 import org.apache.parquet.format.CompressionCodec;
 import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
+import org.apache.parquet.hadoop.metadata.ColumnPath;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
+import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.PrimitiveType;
 import org.apache.parquet.schema.Types;
 import org.joda.time.DateTimeZone;
@@ -46,22 +53,30 @@ import org.testng.annotations.Test;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
+import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
 
 import static com.google.common.base.MoreObjects.toStringHelper;
+import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static io.trino.hadoop.ConfigurationInstantiator.newEmptyConfiguration;
 import static io.trino.plugin.hive.HiveTestUtils.HDFS_ENVIRONMENT;
 import static io.trino.plugin.hive.HiveTestUtils.getHiveSession;
 import static io.trino.plugin.hive.HiveTestUtils.toNativeContainerValue;
+import static io.trino.plugin.hive.parquet.ParquetTester.getIterators;
+import static io.trino.plugin.hive.parquet.ParquetTester.writeParquetColumnTrino;
 import static io.trino.spi.predicate.Domain.multipleValues;
 import static io.trino.spi.predicate.TupleDomain.withColumnDomains;
+import static io.trino.spi.type.BigintType.BIGINT;
 import static io.trino.spi.type.DateType.DATE;
 import static io.trino.spi.type.DoubleType.DOUBLE;
 import static io.trino.spi.type.IntegerType.INTEGER;
@@ -70,6 +85,7 @@ import static io.trino.spi.type.SmallintType.SMALLINT;
 import static io.trino.spi.type.TinyintType.TINYINT;
 import static io.trino.spi.type.VarbinaryType.VARBINARY;
 import static io.trino.spi.type.VarcharType.createVarcharType;
+import static java.util.Arrays.stream;
 import static java.util.Collections.singletonList;
 import static java.util.Collections.singletonMap;
 import static java.util.Objects.requireNonNull;
@@ -84,7 +100,10 @@ import static org.apache.hadoop.hive.serde2.objectinspector.primitive.PrimitiveO
 import static org.apache.hadoop.hive.serde2.objectinspector.primitive.PrimitiveObjectInspectorFactory.javaShortObjectInspector;
 import static org.apache.hadoop.hive.serde2.objectinspector.primitive.PrimitiveObjectInspectorFactory.javaStringObjectInspector;
 import static org.apache.parquet.column.ParquetProperties.WriterVersion.PARQUET_1_0;
+import static org.apache.parquet.format.CompressionCodec.GZIP;
 import static org.apache.parquet.hadoop.ParquetOutputFormat.BLOOM_FILTER_ENABLED;
+import static org.apache.parquet.hadoop.ParquetOutputFormat.COMPRESSION;
+import static org.apache.parquet.hadoop.ParquetOutputFormat.ENABLE_DICTIONARY;
 import static org.apache.parquet.hadoop.ParquetOutputFormat.WRITER_VERSION;
 import static org.apache.parquet.hadoop.metadata.ColumnPath.fromDotString;
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.BINARY;
@@ -307,6 +326,54 @@ public class TestBloomFilterStore
             TupleDomainParquetPredicate parquetPredicateWithoutMatch = new TupleDomainParquetPredicate(domainWithoutMatch, singletonList(columnDescriptor), UTC);
             assertTrue(parquetPredicateWithoutMatch.matches(bloomFilterStore, DOMAIN_COMPACTION_THRESHOLD));
         }
+    }
+
+    @Test
+    public void testIntParquetWrite()
+            throws Exception
+    {
+        List<Integer> values = new ArrayList<>(31_234);
+        for (int i = 0; i < 31_234; i++) {
+            values.add(i);
+        }
+        Collections.shuffle(values, new Random(0));
+        try (ParquetTester.TempFile tempFile = new ParquetTester.TempFile("bloomFilterWriteTest", ".parquet")) {
+            BloomFilterStore bloomFilterStore = testWriteBloomFilter(
+                    tempFile,
+                    values.size(),
+                    new Iterable<?>[] {values},
+                    singletonList("test"),
+                    singletonList(INTEGER),
+                    ParquetTester.ParquetSchemaOptions.defaultOptions()
+            );
+            Optional<BloomFilter> bloomFilterOptional= bloomFilterStore.getBloomFilter(ColumnPath.fromDotString("test"));
+            System.out.println();
+        }
+    }
+
+    private BloomFilterStore testWriteBloomFilter(
+            ParquetTester.TempFile tempFile,
+            int size,
+            Iterable<?>[] values,
+            List<String> columnNames,
+            List<Type> columnTypes,
+            ParquetTester.ParquetSchemaOptions schemaOptions)
+            throws Exception
+    {
+        // write Trino parquet
+        writeParquetColumnTrino(tempFile.getFile(), columnTypes, columnNames, getIterators(values), size, GZIP, schemaOptions);
+
+        TrinoFileSystemFactory fileSystemFactory = new HdfsFileSystemFactory(HDFS_ENVIRONMENT);
+        TrinoFileSystem fileSystem = fileSystemFactory.create(getHiveSession(new HiveConfig().setHiveStorageFormat(HiveStorageFormat.PARQUET)));
+        TrinoInputFile inputFile = fileSystem.newInputFile(tempFile.getFile().getPath());
+        TrinoParquetDataSource dataSource = new TrinoParquetDataSource(inputFile, new ParquetReaderOptions(), new FileFormatDataSourceStats());
+
+        ParquetMetadata parquetMetadata = MetadataReader.readFooter(dataSource, Optional.empty());
+        ColumnChunkMetaData columnChunkMetaData = getOnlyElement(getOnlyElement(parquetMetadata.getBlocks()).getColumns());
+
+        columnChunkMetaData.getFirstDataPageOffset();
+        BloomFilterStore bloomFilterStore = new BloomFilterStore(dataSource, getOnlyElement(parquetMetadata.getBlocks()), Set.of(columnChunkMetaData.getPath()));
+        return bloomFilterStore;
     }
 
     private static BloomFilterStore generateBloomFilterStore(ParquetTester.TempFile tempFile, boolean enableBloomFilter, List<Object> testValues, ObjectInspector objectInspector)

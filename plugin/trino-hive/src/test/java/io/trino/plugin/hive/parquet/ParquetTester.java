@@ -685,7 +685,7 @@ public class ParquetTester
         }
     }
 
-    private static Iterator<?>[] getIterators(Iterable<?>[] values)
+    public static Iterator<?>[] getIterators(Iterable<?>[] values)
     {
         return stream(values)
                 .map(Iterable::iterator)
@@ -748,7 +748,7 @@ public class ParquetTester
         return type.getObjectValue(SESSION, block, position);
     }
 
-    private static void writeParquetColumnTrino(
+    public static void writeParquetColumnTrino(
             File outputFile,
             List<Type> types,
             List<String> columnNames,

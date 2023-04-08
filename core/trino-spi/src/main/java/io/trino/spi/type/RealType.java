@@ -39,6 +39,7 @@ import static java.lang.Math.toIntExact;
 import static java.lang.String.format;
 import static java.lang.invoke.MethodHandles.lookup;
 
+// todo implement bloomfilter
 public final class RealType
         extends AbstractIntType
 {

@@ -20,41 +20,51 @@ import org.apache.parquet.column.values.bloomfilter.BloomFilter;
 import org.apache.parquet.schema.PrimitiveType;
 
 import java.util.Optional;
+import java.util.function.BiFunction;
+import java.util.function.Consumer;
 
-import static java.lang.Math.toIntExact;
+import static io.trino.parquet.BloomFilterUtil.getBloomFilterCalculateFunction;
 import static java.util.Objects.requireNonNull;
 
 public class IntegerValueWriter
         extends PrimitiveValueWriter
 {
     private final Type type;
+    private final Optional<Consumer<Object>> updateBloomFilterOptional;
 
     public IntegerValueWriter(ValuesWriter valuesWriter, Type type, PrimitiveType parquetType, Optional<BloomFilter> bloomFilterOptional)
     {
         super(parquetType, valuesWriter, bloomFilterOptional);
         this.type = requireNonNull(type, "type is null");
+
+        Optional<BiFunction<Object, BloomFilter, Long>> bloomFilterHashFunctionOptional = getBloomFilterCalculateFunction(type);
+        if (bloomFilterHashFunctionOptional.isPresent() && bloomFilterOptional.isPresent()) {
+            BiFunction<Object, BloomFilter, Long> computeFunction = bloomFilterHashFunctionOptional.get();
+            BloomFilter bloomFilter = bloomFilterOptional.get();
+
+            updateBloomFilterOptional = Optional.of((predicate) -> {
+                long bloomFilterHash = computeFunction.apply(predicate, bloomFilter);
+                bloomFilter.insertHash(bloomFilterHash);
+            });
+        } else {
+            updateBloomFilterOptional = Optional.empty();
+        }
     }
 
     @Override
     public void write(Block block)
     {
+
         for (int i = 0; i < block.getPositionCount(); ++i) {
             if (!block.isNull(i)) {
                 int value = (int) type.getLong(block, i);
                 getValueWriter().writeInteger(value);
                 getStatistics().updateStats(value);
-                // todo: update bloomfilter here
-                if (getBloomFilter().isPresent()) {
 
-                    long hashValue = getHash(getBloomFilter().get(), value);
-                    getBloomFilter().get().insertHash(hashValue);
-//                    System.out.println("bloomfilter is available");
-                }
+                updateBloomFilterOptional.ifPresent(updateBloomFilter -> {
+                    updateBloomFilter.accept(value);
+                });
             }
         }
-    }
-
-    private static long getHash(BloomFilter bloomFilter, int value) {
-        return bloomFilter.hash(toIntExact(((Number) value).longValue()));
     }
 }

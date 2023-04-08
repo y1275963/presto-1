@@ -62,6 +62,7 @@ import java.util.Optional;
 import java.util.function.Function;
 
 import static com.google.common.base.Preconditions.checkArgument;
+import static io.trino.parquet.BloomFilterUtil.getBloomFilterHash;
 import static io.trino.parquet.ParquetTimestampUtils.decodeInt64Timestamp;
 import static io.trino.parquet.ParquetTimestampUtils.decodeInt96Timestamp;
 import static io.trino.parquet.ParquetTypeUtils.getShortDecimalValue;
@@ -637,27 +638,12 @@ public class TupleDomainParquetPredicate
     @VisibleForTesting
     public static boolean checkInBloomFilter(BloomFilter bloomFilter, Object predicateValue, Type sqlType)
     {
-        // TODO: Support TIMESTAMP, CHAR and DECIMAL
-        if (sqlType == TINYINT || sqlType == SMALLINT || sqlType == INTEGER || sqlType == DATE) {
-            return bloomFilter.findHash(bloomFilter.hash(toIntExact(((Number) predicateValue).longValue())));
-        }
-        if (sqlType == BIGINT) {
-            return bloomFilter.findHash(bloomFilter.hash(((Number) predicateValue).longValue()));
-        }
-        else if (sqlType == DOUBLE) {
-            return bloomFilter.findHash(bloomFilter.hash(((Double) predicateValue).doubleValue()));
-        }
-        else if (sqlType == REAL) {
-            return bloomFilter.findHash(bloomFilter.hash(intBitsToFloat(toIntExact(((Number) predicateValue).longValue()))));
-        }
-        else if (sqlType instanceof VarcharType || sqlType instanceof VarbinaryType) {
-            return bloomFilter.findHash(bloomFilter.hash(Binary.fromConstantByteBuffer(((Slice) predicateValue).toByteBuffer())));
-        }
-        else if (sqlType instanceof UuidType) {
-            return bloomFilter.findHash(bloomFilter.hash(Binary.fromConstantByteArray(((Slice) predicateValue).getBytes())));
-        }
+        Optional<Long> bloomFilterHash = getBloomFilterHash(bloomFilter, predicateValue, sqlType);
 
-        return true;
+        if (bloomFilterHash.isEmpty()) {
+            return true;
+        }
+        return bloomFilter.findHash(bloomFilterHash.get());
     }
 
     private static Optional<Collection<Object>> extractDiscreteValues(int domainCompactionThreshold, ValueSet valueSet)

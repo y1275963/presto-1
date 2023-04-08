@@ -63,6 +63,7 @@ import java.util.OptionalLong;
 import java.util.function.Predicate;
 
 import static com.google.common.base.Preconditions.checkArgument;
+import static io.trino.parquet.BloomFilterUtil.typeSupported;
 import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
 import static io.trino.spi.type.BigintType.BIGINT;
 import static io.trino.spi.type.BooleanType.BOOLEAN;
@@ -169,7 +170,7 @@ final class ParquetWriters
             int fieldRepetitionLevel = type.getMaxRepetitionLevel(path);
             ColumnDescriptor columnDescriptor = new ColumnDescriptor(path, primitive, fieldRepetitionLevel, fieldDefinitionLevel);
             Type trinoType = requireNonNull(trinoTypes.get(ImmutableList.copyOf(path)), "Trino type is null");
-            Optional<BloomFilter> bloomFilterOptional = getColumnChunkBloomFilter(columnDescriptor);
+            Optional<BloomFilter> bloomFilterOptional = getColumnChunkBloomFilter(columnDescriptor, trinoType);
 
             return new PrimitiveColumnWriter(
                     columnDescriptor,
@@ -180,11 +181,10 @@ final class ParquetWriters
                     parquetProperties.getPageSizeThreshold());
         }
 
-        // todo, make sure if a type is not supported, we do not add the bloomfilter in the first place
-        private Optional<BloomFilter> getColumnChunkBloomFilter(ColumnDescriptor columnDescriptor) {
+        private Optional<BloomFilter> getColumnChunkBloomFilter(ColumnDescriptor columnDescriptor, Type trinoType) {
             boolean isBloomFilterEnabled = parquetProperties.isBloomFilterEnabled(columnDescriptor);
 
-            if (isBloomFilterEnabled) {
+            if (isBloomFilterEnabled && typeSupported(trinoType)) {
                 BloomFilter bloomFilter;
                 int maxBloomFilterSize = parquetProperties.getMaxBloomFilterBytes();
                 OptionalLong ndv = parquetProperties.getBloomFilterNDV(columnDescriptor);
