@@ -170,7 +170,7 @@ final class ParquetWriters
             int fieldRepetitionLevel = type.getMaxRepetitionLevel(path);
             ColumnDescriptor columnDescriptor = new ColumnDescriptor(path, primitive, fieldRepetitionLevel, fieldDefinitionLevel);
             Type trinoType = requireNonNull(trinoTypes.get(ImmutableList.copyOf(path)), "Trino type is null");
-            Optional<BloomFilter> bloomFilterOptional = getColumnChunkBloomFilter(columnDescriptor, trinoType);
+            Optional<BloomFilter> bloomFilterOptional = initializeBloomFilter(columnDescriptor, trinoType);
 
             return new PrimitiveColumnWriter(
                     columnDescriptor,
@@ -181,7 +181,7 @@ final class ParquetWriters
                     parquetProperties.getPageSizeThreshold());
         }
 
-        private Optional<BloomFilter> getColumnChunkBloomFilter(ColumnDescriptor columnDescriptor, Type trinoType) {
+        private Optional<BloomFilter> initializeBloomFilter(ColumnDescriptor columnDescriptor, Type trinoType) {
             boolean isBloomFilterEnabled = parquetProperties.isBloomFilterEnabled(columnDescriptor);
 
             if (isBloomFilterEnabled && typeSupported(trinoType)) {
@@ -276,7 +276,7 @@ final class ParquetWriters
         }
         if (type instanceof VarcharType || type instanceof CharType || type instanceof VarbinaryType) {
             // Binary writer is suitable also for char data, as UTF-8 encoding is used on both sides.
-            return new BinaryValueWriter(valuesWriter, type, parquetType);
+            return new BinaryValueWriter(valuesWriter, type, parquetType, bloomFilterOptional);
         }
         if (type instanceof UuidType) {
             return new UuidValueWriter(valuesWriter, parquetType);

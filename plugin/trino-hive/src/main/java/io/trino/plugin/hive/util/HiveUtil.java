@@ -29,6 +29,8 @@ import io.airlift.slice.Slices;
 import io.trino.hadoop.TextLineLengthLimitExceededException;
 import io.trino.hive.formats.compression.CompressionKind;
 import io.trino.orc.OrcWriterOptions;
+import io.trino.parquet.writer.BloomFilterColumnConfig;
+import io.trino.parquet.writer.ParquetWriterOptions;
 import io.trino.plugin.hive.HiveColumnHandle;
 import io.trino.plugin.hive.HivePartitionKey;
 import io.trino.plugin.hive.HiveStorageFormat;
@@ -97,7 +99,9 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Properties;
+import java.util.Set;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static com.google.common.base.MoreObjects.firstNonNull;
 import static com.google.common.base.Preconditions.checkArgument;
@@ -130,6 +134,7 @@ import static io.trino.plugin.hive.HiveErrorCode.HIVE_SERDE_NOT_FOUND;
 import static io.trino.plugin.hive.HiveErrorCode.HIVE_UNSUPPORTED_FORMAT;
 import static io.trino.plugin.hive.HiveMetadata.ORC_BLOOM_FILTER_COLUMNS_KEY;
 import static io.trino.plugin.hive.HiveMetadata.ORC_BLOOM_FILTER_FPP_KEY;
+import static io.trino.plugin.hive.HiveMetadata.PARQUET_BLOOM_FILTER_COLUMNS_KEY;
 import static io.trino.plugin.hive.HiveMetadata.SKIP_FOOTER_COUNT_KEY;
 import static io.trino.plugin.hive.HiveMetadata.SKIP_HEADER_COUNT_KEY;
 import static io.trino.plugin.hive.HivePartitionKey.HIVE_DEFAULT_DYNAMIC_PARTITION;
@@ -1083,6 +1088,16 @@ public final class HiveUtil
             }
         }
         return orcWriterOptions;
+    }
+
+    // todo: further parsing to support ndv and max size
+    public static Set<String> getParquetBloomFilterColumns(Properties schema)
+    {
+        if (schema.containsKey(PARQUET_BLOOM_FILTER_COLUMNS_KEY)) {
+            Set<String> bloomFilterColumns = ImmutableSet.copyOf(COLUMN_NAMES_SPLITTER.splitToList(schema.getProperty(PARQUET_BLOOM_FILTER_COLUMNS_KEY)));
+            return bloomFilterColumns;
+        }
+        return ImmutableSet.of();
     }
 
     public static SortingColumn sortingColumnFromString(String name)

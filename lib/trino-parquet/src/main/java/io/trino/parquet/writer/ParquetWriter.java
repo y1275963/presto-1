@@ -446,13 +446,19 @@ public class ParquetWriter
     private void initColumnWriters()
     {
         // todo respect bloom filter configs here
-        ParquetProperties parquetProperties = ParquetProperties.builder()
+        ParquetProperties.Builder parquetProperties = ParquetProperties.builder()
                 .withWriterVersion(PARQUET_1_0)
-                .withPageSize(writerOption.getMaxPageSize())
-                .withBloomFilterEnabled("test", true)
-                .build();
+                .withPageSize(writerOption.getMaxPageSize());
 
-        this.columnWriters = ParquetWriters.getColumnWriters(messageType, primitiveTypes, parquetProperties, compressionCodec, parquetTimeZone);
+        parquetProperties.withMaxBloomFilterBytes(writerOption.getBloomFilterMaxSize());
+        for (String columnName : writerOption.getBloomFilterColumns()) {
+            parquetProperties.withBloomFilterEnabled(columnName, true);
+        }
+        for (ParquetWriterOptions.bloomFilterNDV bloomFilterNDV : writerOption.getBloomFilterNDV()) {
+            parquetProperties.withBloomFilterNDV(bloomFilterNDV.columnName(), bloomFilterNDV.ndvValue());
+        }
+
+        this.columnWriters = ParquetWriters.getColumnWriters(messageType, primitiveTypes, parquetProperties.build(), compressionCodec, parquetTimeZone);
     }
 
     public static String getPath(String[] paths) {

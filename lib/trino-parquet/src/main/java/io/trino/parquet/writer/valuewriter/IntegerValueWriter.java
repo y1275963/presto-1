@@ -30,25 +30,11 @@ public class IntegerValueWriter
         extends PrimitiveValueWriter
 {
     private final Type type;
-    private final Optional<Consumer<Object>> updateBloomFilterOptional;
 
     public IntegerValueWriter(ValuesWriter valuesWriter, Type type, PrimitiveType parquetType, Optional<BloomFilter> bloomFilterOptional)
     {
-        super(parquetType, valuesWriter, bloomFilterOptional);
+        super(parquetType, valuesWriter, type, bloomFilterOptional);
         this.type = requireNonNull(type, "type is null");
-
-        Optional<BiFunction<Object, BloomFilter, Long>> bloomFilterHashFunctionOptional = getBloomFilterCalculateFunction(type);
-        if (bloomFilterHashFunctionOptional.isPresent() && bloomFilterOptional.isPresent()) {
-            BiFunction<Object, BloomFilter, Long> computeFunction = bloomFilterHashFunctionOptional.get();
-            BloomFilter bloomFilter = bloomFilterOptional.get();
-
-            updateBloomFilterOptional = Optional.of((predicate) -> {
-                long bloomFilterHash = computeFunction.apply(predicate, bloomFilter);
-                bloomFilter.insertHash(bloomFilterHash);
-            });
-        } else {
-            updateBloomFilterOptional = Optional.empty();
-        }
     }
 
     @Override

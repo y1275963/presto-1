@@ -61,6 +61,7 @@ import static io.trino.plugin.hive.HiveSessionProperties.isParquetOptimizedWrite
 import static io.trino.plugin.hive.util.HiveClassNames.MAPRED_PARQUET_OUTPUT_FORMAT_CLASS;
 import static io.trino.plugin.hive.util.HiveUtil.getColumnNames;
 import static io.trino.plugin.hive.util.HiveUtil.getColumnTypes;
+import static io.trino.plugin.hive.util.HiveUtil.getParquetBloomFilterColumns;
 import static java.util.Objects.requireNonNull;
 import static java.util.stream.Collectors.toList;
 
@@ -110,6 +111,7 @@ public class ParquetFileWriterFactory
         }
 
         ParquetWriterOptions parquetWriterOptions = ParquetWriterOptions.builder()
+                .setBloomFilterColumns(getParquetBloomFilterColumns(schema))
                 .setMaxPageSize(HiveSessionProperties.getParquetWriterPageSize(session))
                 .setMaxBlockSize(HiveSessionProperties.getParquetWriterBlockSize(session))
                 .setBatchSize(HiveSessionProperties.getParquetBatchSize(session))

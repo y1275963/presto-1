@@ -13,8 +13,12 @@
  */
 package io.trino.parquet.writer;
 
+import com.google.common.collect.ImmutableSet;
 import io.airlift.units.DataSize;
 import org.apache.parquet.hadoop.ParquetWriter;
+
+import java.util.HashSet;
+import java.util.Set;
 
 import static java.lang.Math.toIntExact;
 
@@ -32,12 +36,16 @@ public class ParquetWriterOptions
     private final int maxRowGroupSize;
     private final int maxPageSize;
     private final int batchSize;
+    private final boolean bloomFilterEnabled;
+    private final Set<String> bloomFilterColumns;
 
-    private ParquetWriterOptions(DataSize maxBlockSize, DataSize maxPageSize, int batchSize)
+    private ParquetWriterOptions(DataSize maxBlockSize, DataSize maxPageSize, int batchSize, Set<String> bloomFilterColumns)
     {
         this.maxRowGroupSize = toIntExact(maxBlockSize.toBytes());
         this.maxPageSize = toIntExact(maxPageSize.toBytes());
         this.batchSize = batchSize;
+        this.bloomFilterEnabled = true;
+        this.bloomFilterColumns = bloomFilterColumns;
     }
 
     public long getMaxRowGroupSize()
@@ -55,11 +63,31 @@ public class ParquetWriterOptions
         return batchSize;
     }
 
+    // todo: translate from properties
+    public int getBloomFilterMaxSize() {
+        return 1024 * 1024;
+    }
+
+    public Set<String> getBloomFilterColumns()
+    {
+        return bloomFilterColumns;
+    }
+
+    // todo: translate from properties
+    public Set<bloomFilterNDV> getBloomFilterNDV() {
+        return ImmutableSet.of();
+    }
+
+    public record bloomFilterNDV(String columnName, long ndvValue) {
+
+    }
+
     public static class Builder
     {
         private DataSize maxBlockSize = DEFAULT_MAX_ROW_GROUP_SIZE;
         private DataSize maxPageSize = DEFAULT_MAX_PAGE_SIZE;
         private int batchSize = DEFAULT_BATCH_SIZE;
+        private Set<String> bloomFilterColumns = new HashSet<>();
 
         public Builder setMaxBlockSize(DataSize maxBlockSize)
         {
@@ -79,9 +107,14 @@ public class ParquetWriterOptions
             return this;
         }
 
+        public Builder setBloomFilterColumns(Set<String> bloomFilterColumns) {
+            this.bloomFilterColumns = bloomFilterColumns;
+            return this;
+        }
+
         public ParquetWriterOptions build()
         {
-            return new ParquetWriterOptions(maxBlockSize, maxPageSize, batchSize);
+            return new ParquetWriterOptions(maxBlockSize, maxPageSize, batchSize, bloomFilterColumns);
         }
     }
 }

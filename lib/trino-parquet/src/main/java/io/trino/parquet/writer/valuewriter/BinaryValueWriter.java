@@ -17,8 +17,12 @@ import io.airlift.slice.Slice;
 import io.trino.spi.block.Block;
 import io.trino.spi.type.Type;
 import org.apache.parquet.column.values.ValuesWriter;
+import org.apache.parquet.column.values.bloomfilter.BloomFilter;
 import org.apache.parquet.io.api.Binary;
 import org.apache.parquet.schema.PrimitiveType;
+
+import java.util.Optional;
+import java.util.function.Consumer;
 
 import static java.util.Objects.requireNonNull;
 
@@ -29,9 +33,9 @@ public class BinaryValueWriter
     private final ValuesWriter valuesWriter;
     private final Type type;
 
-    public BinaryValueWriter(ValuesWriter valuesWriter, Type type, PrimitiveType parquetType)
+    public BinaryValueWriter(ValuesWriter valuesWriter, Type type, PrimitiveType parquetType, Optional<BloomFilter> bloomFilterOptional)
     {
-        super(parquetType, valuesWriter);
+        super(parquetType, valuesWriter, type, bloomFilterOptional);
         this.valuesWriter = requireNonNull(valuesWriter, "valuesWriter is null");
         this.type = requireNonNull(type, "type is null");
     }
@@ -45,6 +49,10 @@ public class BinaryValueWriter
                 Binary binary = Binary.fromConstantByteBuffer(slice.toByteBuffer());
                 valuesWriter.writeBytes(binary);
                 getStatistics().updateStats(binary);
+
+                updateBloomFilterOptional.ifPresent(updateBloomFilter -> {
+                    updateBloomFilter.accept(binary);
+                });
             }
         }
     }

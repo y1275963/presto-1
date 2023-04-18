@@ -225,6 +225,7 @@ import static io.trino.plugin.hive.HiveTableProperties.EXTERNAL_LOCATION_PROPERT
 import static io.trino.plugin.hive.HiveTableProperties.NULL_FORMAT_PROPERTY;
 import static io.trino.plugin.hive.HiveTableProperties.ORC_BLOOM_FILTER_COLUMNS;
 import static io.trino.plugin.hive.HiveTableProperties.ORC_BLOOM_FILTER_FPP;
+import static io.trino.plugin.hive.HiveTableProperties.PARQUET_BLOOM_FILTER_COLUMNS;
 import static io.trino.plugin.hive.HiveTableProperties.PARTITIONED_BY_PROPERTY;
 import static io.trino.plugin.hive.HiveTableProperties.REGEX_CASE_INSENSITIVE;
 import static io.trino.plugin.hive.HiveTableProperties.REGEX_PATTERN;
@@ -244,6 +245,7 @@ import static io.trino.plugin.hive.HiveTableProperties.getHiveStorageFormat;
 import static io.trino.plugin.hive.HiveTableProperties.getNullFormat;
 import static io.trino.plugin.hive.HiveTableProperties.getOrcBloomFilterColumns;
 import static io.trino.plugin.hive.HiveTableProperties.getOrcBloomFilterFpp;
+import static io.trino.plugin.hive.HiveTableProperties.getParquetBloomFilterColumns;
 import static io.trino.plugin.hive.HiveTableProperties.getPartitionedBy;
 import static io.trino.plugin.hive.HiveTableProperties.getRegexPattern;
 import static io.trino.plugin.hive.HiveTableProperties.getSingleCharacterProperty;
@@ -353,6 +355,8 @@ public class HiveMetadata
 
     public static final String ORC_BLOOM_FILTER_COLUMNS_KEY = "orc.bloom.filter.columns";
     public static final String ORC_BLOOM_FILTER_FPP_KEY = "orc.bloom.filter.fpp";
+
+    public static final String PARQUET_BLOOM_FILTER_COLUMNS_KEY = "parquet.bloom.filter.columns";
 
     public static final String SKIP_HEADER_COUNT_KEY = SerdeConstants.HEADER_COUNT;
     public static final String SKIP_FOOTER_COUNT_KEY = SerdeConstants.FOOTER_COUNT;
@@ -670,6 +674,13 @@ public class HiveMetadata
         if (orcBloomFilterFfp != null) {
             properties.put(ORC_BLOOM_FILTER_FPP, Double.parseDouble(orcBloomFilterFfp));
         }
+
+        // Parquet format specific properties
+        String parquetBloomFilterColumns = table.getParameters().get(PARQUET_BLOOM_FILTER_COLUMNS_KEY);
+        if (parquetBloomFilterColumns != null) {
+            properties.put(PARQUET_BLOOM_FILTER_COLUMNS, Splitter.on(',').omitEmptyStrings().splitToList(parquetBloomFilterColumns));
+        }
+
 
         // Avro specific property
         String avroSchemaUrl = table.getParameters().get(AVRO_SCHEMA_URL_KEY);
@@ -1045,12 +1056,20 @@ public class HiveMetadata
                 tableProperties.put(BUCKETING_VERSION, Integer.toString(hiveBucketProperty.getBucketingVersion().getVersion())));
 
         // ORC format specific properties
-        List<String> columns = getOrcBloomFilterColumns(tableMetadata.getProperties());
-        if (columns != null && !columns.isEmpty()) {
+        List<String> orcColumns = getOrcBloomFilterColumns(tableMetadata.getProperties());
+        if (orcColumns != null && !orcColumns.isEmpty()) {
             checkFormatForProperty(hiveStorageFormat, HiveStorageFormat.ORC, ORC_BLOOM_FILTER_COLUMNS);
-            validateOrcBloomFilterColumns(tableMetadata, columns);
-            tableProperties.put(ORC_BLOOM_FILTER_COLUMNS_KEY, Joiner.on(",").join(columns));
+            validateBloomFilterColumns(tableMetadata, orcColumns);
+            tableProperties.put(ORC_BLOOM_FILTER_COLUMNS_KEY, Joiner.on(",").join(orcColumns));
             tableProperties.put(ORC_BLOOM_FILTER_FPP_KEY, String.valueOf(getOrcBloomFilterFpp(tableMetadata.getProperties())));
+        }
+
+        // Parquet specific properties
+        List<String> parquetColumns = getParquetBloomFilterColumns(tableMetadata.getProperties());
+        if (parquetColumns != null && !parquetColumns.isEmpty()) {
+            checkFormatForProperty(hiveStorageFormat, HiveStorageFormat.PARQUET, PARQUET_BLOOM_FILTER_COLUMNS);
+            validateBloomFilterColumns(tableMetadata, parquetColumns);
+            tableProperties.put(PARQUET_BLOOM_FILTER_COLUMNS_KEY, Joiner.on(",").join(parquetColumns));
         }
 
         // Avro specific properties
@@ -1180,13 +1199,13 @@ public class HiveMetadata
         }
     }
 
-    private void validateOrcBloomFilterColumns(ConnectorTableMetadata tableMetadata, List<String> orcBloomFilterColumns)
+    private void validateBloomFilterColumns(ConnectorTableMetadata tableMetadata, List<String> bloomFilterColumns)
     {
         Set<String> allColumns = tableMetadata.getColumns().stream()
                 .map(ColumnMetadata::getName)
                 .collect(toImmutableSet());
-        if (!allColumns.containsAll(orcBloomFilterColumns)) {
-            throw new TrinoException(INVALID_TABLE_PROPERTY, format("Orc bloom filter columns %s not present in schema", Sets.difference(ImmutableSet.copyOf(orcBloomFilterColumns), allColumns)));
+        if (!allColumns.containsAll(bloomFilterColumns)) {
+            throw new TrinoException(INVALID_TABLE_PROPERTY, format("bloom filter columns %s not present in schema", Sets.difference(ImmutableSet.copyOf(bloomFilterColumns), allColumns)));
         }
     }
 

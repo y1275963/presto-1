@@ -55,6 +55,7 @@ public class HiveTableProperties
     public static final String SORTED_BY_PROPERTY = "sorted_by";
     public static final String ORC_BLOOM_FILTER_COLUMNS = "orc_bloom_filter_columns";
     public static final String ORC_BLOOM_FILTER_FPP = "orc_bloom_filter_fpp";
+    public static final String PARQUET_BLOOM_FILTER_COLUMNS = "parquet_bloom_filter_columns";
     public static final String AVRO_SCHEMA_URL = "avro_schema_url";
     public static final String AVRO_SCHEMA_LITERAL = "avro_schema_literal";
     public static final String TEXTFILE_FIELD_SEPARATOR = "textfile_field_separator";
@@ -129,6 +130,18 @@ public class HiveTableProperties
                 new PropertyMetadata<>(
                         ORC_BLOOM_FILTER_COLUMNS,
                         "ORC Bloom filter index columns",
+                        new ArrayType(VARCHAR),
+                        List.class,
+                        ImmutableList.of(),
+                        false,
+                        value -> ((List<?>) value).stream()
+                                .map(String.class::cast)
+                                .map(name -> name.toLowerCase(ENGLISH))
+                                .collect(toImmutableList()),
+                        value -> value),
+                new PropertyMetadata<>(
+                        PARQUET_BLOOM_FILTER_COLUMNS,
+                        "Parquet Bloom filter index columns",
                         new ArrayType(VARCHAR),
                         List.class,
                         ImmutableList.of(),
@@ -277,6 +290,12 @@ public class HiveTableProperties
     public static Double getOrcBloomFilterFpp(Map<String, Object> tableProperties)
     {
         return (Double) tableProperties.get(ORC_BLOOM_FILTER_FPP);
+    }
+
+    @SuppressWarnings("unchecked")
+    public static List<String> getParquetBloomFilterColumns(Map<String, Object> tableProperties)
+    {
+        return (List<String>) tableProperties.get(PARQUET_BLOOM_FILTER_COLUMNS);
     }
 
     public static Optional<Character> getSingleCharacterProperty(Map<String, Object> tableProperties, String key)

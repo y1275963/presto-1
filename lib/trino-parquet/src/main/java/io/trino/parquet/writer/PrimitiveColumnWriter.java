@@ -14,6 +14,7 @@
 package io.trino.parquet.writer;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import io.airlift.slice.Slices;
 import io.trino.parquet.writer.repdef.DefLevelWriterProvider;
 import io.trino.parquet.writer.repdef.DefLevelWriterProviders;
@@ -26,7 +27,6 @@ import org.apache.parquet.column.Encoding;
 import org.apache.parquet.column.page.DictionaryPage;
 import org.apache.parquet.column.statistics.Statistics;
 import org.apache.parquet.column.values.ValuesWriter;
-import org.apache.parquet.column.values.bloomfilter.BloomFilter;
 import org.apache.parquet.format.ColumnMetaData;
 import org.apache.parquet.format.CompressionCodec;
 import org.apache.parquet.format.PageEncodingStats;
@@ -43,7 +43,6 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 
 import static com.google.common.base.Preconditions.checkState;
@@ -61,6 +60,7 @@ public class PrimitiveColumnWriter
         implements ColumnWriter
 {
     private static final int INSTANCE_SIZE = instanceSize(PrimitiveColumnWriter.class);
+    private static final Set<Encoding> DICTIONARY_ONLY_ENCODING = ImmutableSet.of(Encoding.PLAIN_DICTIONARY, Encoding.RLE_DICTIONARY);
 
     private final ColumnDescriptor columnDescriptor;
     private final CompressionCodec compressionCodec;
@@ -316,7 +316,7 @@ public class PrimitiveColumnWriter
         if (primitiveValueWriter.getBloomFilter().isPresent()) {
             // write bloom filter if one of data pages is not dictionary encoded
             for (Encoding encoding : encodings) {
-                if (Encoding.RLE_DICTIONARY != encoding) {
+                if (!DICTIONARY_ONLY_ENCODING.contains(encoding)) {
                     return new BloomFilterWriteStore(getPath(columnDescriptor.getPath()), primitiveValueWriter.getBloomFilter().get());
                 }
             }
